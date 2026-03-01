@@ -43,32 +43,20 @@ wlDisplayConnect = do
 parseEvent :: Word32 -> Maybe Word32 -> ObjectTracker -> Get WaylandEvent
 parseEvent registryID wl_shmID tracker = do
   header <- get
-  let matchEvent' = matchEvent header
-      maybeMatchEvent' = maybeMatchEvent header
-      bodySize = fromIntegral header.size - 8
+  let bodySize = fromIntegral header.size - 8
       ev :: (Binary a, WaylandEventType a, Typeable a) => Get a -> Get WaylandEvent
       ev = fmap (Event header)
+      matchEvent oid opcode = oid == header.objectID && header.opCode == opcode
+      matchEventM oid opcode = fromMaybe False $ matchEvent <$> oid <*> pure opcode
   if
-    | matchEvent' wlDisplayID 0 -> ev (get @EventDisplayError)
-    | matchEvent' wlDisplayID 1 -> ev (get @EventDisplayDeleteId)
-    | matchEvent' registryID 0 -> ev (get @EventGlobal)
-    | matchEvent' registryID 1 -> skip bodySize $> EvUnknown header
-    | maybeMatchEvent' wl_shmID 0 -> ev (get @EventShmFormat)
-    | maybeMatchEvent' tracker.zwlr_layer_surface_v1ID 0 -> ev (get @EventWlrLayerSurfaceConfigure)
-    | matchBufferEvent header tracker.wl_buffer_A 0 -> pure $ EvEmpty header EventBufferRelease
-    | matchBufferEvent header tracker.wl_buffer_B 0 -> pure $ EvEmpty header EventBufferRelease
+    | matchEvent wlDisplayID 0 -> ev (get @EventDisplayError)
+    | matchEvent wlDisplayID 1 -> ev (get @EventDisplayDeleteId)
+    | matchEvent registryID 0 -> ev (get @EventGlobal)
+    | matchEventM wl_shmID 0 -> ev (get @EventShmFormat)
+    | matchEventM tracker.zwlr_layer_surface_v1ID 0 -> ev (get @EventWlrLayerSurfaceConfigure)
+    | matchEventM ((.id) <$> tracker.wl_buffer_A) 0 -> pure $ EvEmpty header EventBufferRelease
+    | matchEventM ((.id) <$> tracker.wl_buffer_B) 0 -> pure $ EvEmpty header EventBufferRelease
     | otherwise -> skip bodySize $> EvUnknown header
-  where
-    maybeMatchEvent :: Header -> Maybe Word32 -> Word16 -> Bool
-    maybeMatchEvent header (Just oid) opcode = matchEvent header oid opcode
-    maybeMatchEvent _ Nothing _ = False
-
-    matchBufferEvent :: Header -> Maybe Buffer -> Word16 -> Bool
-    matchBufferEvent header (Just buffer) opcode = matchEvent header buffer.id opcode
-    matchBufferEvent _ Nothing _ = False
-
-    matchEvent :: Header -> Word32 -> Word16 -> Bool
-    matchEvent header oid opcode = oid == header.objectID && header.opCode == opcode
 
 parseEvents :: Word32 -> Maybe Word32 -> ObjectTracker -> Get [WaylandEvent]
 parseEvents registryID wl_shmID tracker = do
@@ -98,7 +86,7 @@ eventLoop = do
     let events = runGet (env.parseEvents tracker) msg
     forM_ events $ \event -> do
       liftIO $ displayEvent event
-      handleEventResponse event -- Handle events that need responses
+      handleEventResponse event
   eventLoop
 
 handleEventResponse :: WaylandEvent -> Wayland ()
