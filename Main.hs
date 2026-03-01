@@ -90,14 +90,13 @@ eventLoop = do
   eventLoop
 
 handleEventResponse :: WaylandEvent -> Wayland ()
-handleEventResponse (Event _ e) = do
-  tracker <- readIORef =<< asks (.tracker)
-  whenJust (cast e) $ \(ev :: EventWlrLayerSurfaceConfigure) ->
-    atomically $ putTMVar tracker.zwlr_layer_surface_v1Serial ev.serial
-handleEventResponse (EvEmpty _ e) = do
-  whenJust (cast e) $ \(_ev :: EventBufferRelease) -> do
-    freeBuffer <- asks (.freeBuffer)
-    takeMVar freeBuffer
+handleEventResponse (Event _ e)
+  | Just (ev :: EventWlrLayerSurfaceConfigure) <- cast e = do
+      tracker <- readIORef =<< asks (.tracker)
+      atomically $ putTMVar tracker.zwlr_layer_surface_v1Serial ev.serial
+handleEventResponse (EvEmpty _ e)
+  | Just (_ :: EventBufferRelease) <- cast e =
+      takeMVar =<< asks (.freeBuffer)
 handleEventResponse _ = return ()
 
 getBarState :: IO BarState
