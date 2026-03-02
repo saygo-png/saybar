@@ -8,15 +8,8 @@ import Config
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Exception
 import Data.Binary
-import Data.Binary.Get hiding (remaining)
-import Data.ByteString qualified as BS
-import Data.ByteString.Internal qualified as BS
 import Data.ByteString.Lazy hiding (count)
 import Data.ByteString.Lazy qualified as BSL
-import Data.ByteString.Lazy.Internal qualified as BSL
-import Data.Map qualified as Map
-import Data.Maybe (fromJust)
-import Data.Typeable
 import Data.Vector.Storable qualified as VS
 import GHC.IO.Handle
 import Graphics.Rasterific
@@ -30,46 +23,7 @@ import System.Posix (ownerReadMode, ownerWriteMode, setFdSize, unionFileModes)
 import System.Posix.IO
 import System.Posix.SharedMem
 import System.Process.Typed
-import Text.Printf (printf)
 import Types
-
-parseEvent :: Map Word32 WaylandInterface -> Get WaylandEvent
-parseEvent objects = do
-  header <- get
-  let bodySize = fromIntegral header.size - 8
-      ev :: (Binary a, WaylandEventType a, Typeable a) => Get a -> Get WaylandEvent
-      ev = fmap (Event header)
-  case (Map.lookup header.objectID objects, header.opCode) of
-    (Just WlDisplay, 0) -> ev (get @EventDisplayError)
-    (Just WlDisplay, 1) -> ev (get @EventDisplayDeleteId)
-    (Just WlRegistry, 0) -> ev (get @EventGlobal)
-    (Just WlShm, 0) -> ev (get @EventShmFormat)
-    (Just ZwlrLayerSurfaceV1, 0) -> ev (get @EventWlrLayerSurfaceConfigure)
-    (Just WlBuffer, 0) -> pure $ EvEmpty header EventBufferRelease
-    _ -> skip bodySize $> EvUnknown header
-
-eventLoop :: Wayland ()
-eventLoop = do
-  env <- ask
-  msg <- liftIO $ receiveSocketData env.socket
-  unless (BSL.null msg)
-    $ processBuffer (BS.toStrict msg)
-  eventLoop
-
-processBuffer :: BS.ByteString -> Wayland ()
-processBuffer bytes = do
-  env <- ask
-  objects <- liftIO $ readIORef env.objects -- fresh read before EACH event
-  case pushChunk (runGetIncremental (parseEvent objects)) bytes of
-    Done remaining _ event -> do
-      liftIO $ displayEvent event
-      handleEventResponse event
-      unless (BS.null remaining)
-        $ processBuffer remaining
-    Partial _ ->
-      return () -- incomplete message, wait for next socket read
-    Fail _ _ err ->
-      liftIO $ putStrLn $ "Parse error: " <> err
 
 swizzleRGBAtoBGRA :: Image PixelRGBA8 -> ByteString
 swizzleRGBAtoBGRA image =
@@ -80,20 +34,6 @@ swizzleRGBAtoBGRA image =
       let premul c = fromIntegral (fromIntegral c * fromIntegral a `div` 255 :: Word16)
        in premul b : premul g : premul r : a : go rest
     go _ = []
-
-handleEventResponse :: WaylandEvent -> Wayland ()
-handleEventResponse (Event h e)
-  | Just (ev :: EventGlobal) <- cast e = do
-      globals <- asks (.globals)
-      modifyIORef globals $ Map.insert ev.name (h, ev)
-handleEventResponse (Event _ e)
-  | Just (ev :: EventWlrLayerSurfaceConfigure) <- cast e = do
-      serial <- asks (.serial)
-      atomically $ putTMVar serial ev.serial
-handleEventResponse (EvEmpty _ e)
-  | Just (_ :: EventBufferRelease) <- cast e =
-      takeMVar =<< asks (.freeBuffer)
-handleEventResponse _ = return ()
 
 getBarState :: IO BarState
 getBarState = do
