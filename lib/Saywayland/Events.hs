@@ -15,7 +15,7 @@ import Data.ByteString.Lazy.Internal
 import GHC.Generics
 import Relude hiding (ByteString, Word32, get, isPrefixOf, put, replicate)
 import Saywayland.Headers
-import Saywayland.Utils
+import Saywayland.Internal.Utils
 import Text.Printf
 
 data WaylandEvent where
@@ -179,3 +179,4 @@ formatName n = "format_" <> show n
 -- Helper to create events
 mkEvent :: (Binary a, WaylandEventType a, Typeable a) => Header -> a -> WaylandEvent
 mkEvent = Event
+

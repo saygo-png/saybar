@@ -10,7 +10,7 @@ import Network.Socket.ByteString (sendManyWithFds)
 import Network.Socket.ByteString.Lazy
 import Relude hiding (ByteString, get, isPrefixOf, length, put, replicate)
 import Saywayland.Types
-import Saywayland.Utils
+import Saywayland.Internal.Utils
 import System.Posix.Types
 import Text.Printf
 

@@ -25,6 +25,7 @@ import Graphics.Text.TrueType (Font, loadFontFile)
 import Network.Socket
 import Relude hiding (ByteString, get, isPrefixOf, put)
 import Saywayland
+import Saywayland.Internal.Utils
 import System.Posix (ownerReadMode, ownerWriteMode, setFdSize, unionFileModes)
 import System.Posix.IO
 import System.Posix.SharedMem
@@ -79,27 +80,6 @@ swizzleRGBAtoBGRA image =
       let premul c = fromIntegral (fromIntegral c * fromIntegral a `div` 255 :: Word16)
        in premul b : premul g : premul r : a : go rest
     go _ = []
-
-findInterface :: Globals -> ByteString -> Maybe EventGlobal
-findInterface globals targetInterface =
-  let target = targetInterface <> "\0"
-   in Relude.find (\(_, e) -> target `isPrefixOf` e.interface) globals >>= Just . snd
-
-bindToInterface :: Word32 -> IORef Globals -> ByteString -> Wayland Word32
-bindToInterface registryID globalsRef targetInterface =
-  let go (count :: Int) = do
-        when
-          (count >= 10)
-          (putStrLn ("ERROR: the wayland global " <> BSL.unpackChars targetInterface <> " not found") >> exitFailure)
-        liftIO $ printf "Trying to bind to %s... (%i)\n" (BSL.unpackChars targetInterface) count
-        env <- ask
-        globals <- readIORef globalsRef
-        case findInterface globals targetInterface of
-          Nothing -> liftIO (threadDelay 100000) >> go (count + 1)
-          Just e -> do
-            newObjectID <- nextID env.counter
-            wlRegistry_bind registryID e.name targetInterface e.version newObjectID
-   in go 1
 
 handleEventResponse :: WaylandEvent -> Wayland ()
 handleEventResponse (Event h e)

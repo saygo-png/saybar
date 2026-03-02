@@ -23,6 +23,7 @@ library saywayland
                    Saywayland.Utils,
                    Saywayland.Requests,
                    Saywayland.Types
+                   Saywayland.Internal.Utils
 
 executable saybar
   import:         common-options
