@@ -5,7 +5,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Events (module Events) where
+module Saywayland.Events (module Saywayland.Events) where
 
 import Data.Binary
 import Data.Binary.Get
@@ -13,11 +13,19 @@ import Data.Binary.Put
 import Data.ByteString.Lazy hiding (map)
 import Data.ByteString.Lazy.Internal
 import GHC.Generics
-import Headers
 import Relude hiding (ByteString, Word32, get, isPrefixOf, put, replicate)
+import Saywayland.Headers
+import Saywayland.Utils
 import Text.Printf
-import Types
-import Utils
+
+data WaylandEvent where
+  Event :: (Binary a, WaylandEventType a, Typeable a) => Header -> a -> WaylandEvent
+  EvEmpty :: (WaylandEventType a, Typeable a) => Header -> a -> WaylandEvent
+  EvUnknown :: Header -> WaylandEvent
+
+-- Type class for events that can describe themselves
+class WaylandEventType a where
+  formatEvent :: Word32 -> a -> String
 
 -- Generic little-endian Binary deriving
 type GBinaryLE :: forall {k}. (k -> Type) -> Constraint
@@ -75,6 +83,8 @@ newtype LittleEndian a = LittleEndian a
 instance (Generic a, GBinaryLE (Rep a)) => Binary (LittleEndian a) where
   get = LittleEndian . to <$> ggetLE
   put (LittleEndian x) = gputLE (from x)
+
+type Globals = Map Word32 (Header, EventGlobal)
 
 data EventGlobal = EventGlobal
   { name :: Word32

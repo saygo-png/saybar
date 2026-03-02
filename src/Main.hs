@@ -1,0 +1,206 @@
+{- HLINT ignore "Use camelCase" -}
+
+module Main (main) where
+
+import Codec.Picture (PixelRGBA8 (..), imageData)
+import Codec.Picture.Types (Image)
+import Config
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Exception
+import Data.Binary
+import Data.Binary.Get hiding (remaining)
+import Data.ByteString qualified as BS
+import Data.ByteString.Internal qualified as BS
+import Data.ByteString.Lazy hiding (count)
+import Data.ByteString.Lazy qualified as BSL
+import Data.ByteString.Lazy.Internal qualified as BSL
+import Data.Map qualified as Map
+import Data.Maybe (fromJust)
+import Data.Typeable
+import Data.Vector.Storable qualified as VS
+import GHC.IO.Handle
+import Graphics.Rasterific
+import Graphics.Rasterific.Texture
+import Graphics.Text.TrueType (Font, loadFontFile)
+import Network.Socket
+import Relude hiding (ByteString, get, isPrefixOf, put)
+import Saywayland
+import System.Posix (ownerReadMode, ownerWriteMode, setFdSize, unionFileModes)
+import System.Posix.IO
+import System.Posix.SharedMem
+import System.Process.Typed
+import Text.Printf (printf)
+import Types
+
+parseEvent :: Map Word32 WaylandInterface -> Get WaylandEvent
+parseEvent objects = do
+  header <- get
+  let bodySize = fromIntegral header.size - 8
+      ev :: (Binary a, WaylandEventType a, Typeable a) => Get a -> Get WaylandEvent
+      ev = fmap (Event header)
+  case (Map.lookup header.objectID objects, header.opCode) of
+    (Just WlDisplay, 0) -> ev (get @EventDisplayError)
+    (Just WlDisplay, 1) -> ev (get @EventDisplayDeleteId)
+    (Just WlRegistry, 0) -> ev (get @EventGlobal)
+    (Just WlShm, 0) -> ev (get @EventShmFormat)
+    (Just ZwlrLayerSurfaceV1, 0) -> ev (get @EventWlrLayerSurfaceConfigure)
+    (Just WlBuffer, 0) -> pure $ EvEmpty header EventBufferRelease
+    _ -> skip bodySize $> EvUnknown header
+
+eventLoop :: Wayland ()
+eventLoop = do
+  env <- ask
+  msg <- liftIO $ receiveSocketData env.socket
+  unless (BSL.null msg)
+    $ processBuffer (BS.toStrict msg)
+  eventLoop
+
+processBuffer :: BS.ByteString -> Wayland ()
+processBuffer bytes = do
+  env <- ask
+  objects <- liftIO $ readIORef env.objects -- fresh read before EACH event
+  case pushChunk (runGetIncremental (parseEvent objects)) bytes of
+    Done remaining _ event -> do
+      liftIO $ displayEvent event
+      handleEventResponse event
+      unless (BS.null remaining)
+        $ processBuffer remaining
+    Partial _ ->
+      return () -- incomplete message, wait for next socket read
+    Fail _ _ err ->
+      liftIO $ putStrLn $ "Parse error: " <> err
+
+swizzleRGBAtoBGRA :: Image PixelRGBA8 -> ByteString
+swizzleRGBAtoBGRA image =
+  pack . go . VS.toList $ imageData image
+  where
+    go [] = []
+    go (r : g : b : a : rest) =
+      let premul c = fromIntegral (fromIntegral c * fromIntegral a `div` 255 :: Word16)
+       in premul b : premul g : premul r : a : go rest
+    go _ = []
+
+findInterface :: Globals -> ByteString -> Maybe EventGlobal
+findInterface globals targetInterface =
+  let target = targetInterface <> "\0"
+   in Relude.find (\(_, e) -> target `isPrefixOf` e.interface) globals >>= Just . snd
+
+bindToInterface :: Word32 -> IORef Globals -> ByteString -> Wayland Word32
+bindToInterface registryID globalsRef targetInterface =
+  let go (count :: Int) = do
+        when
+          (count >= 10)
+          (putStrLn ("ERROR: the wayland global " <> BSL.unpackChars targetInterface <> " not found") >> exitFailure)
+        liftIO $ printf "Trying to bind to %s... (%i)\n" (BSL.unpackChars targetInterface) count
+        env <- ask
+        globals <- readIORef globalsRef
+        case findInterface globals targetInterface of
+          Nothing -> liftIO (threadDelay 100000) >> go (count + 1)
+          Just e -> do
+            newObjectID <- nextID env.counter
+            wlRegistry_bind registryID e.name targetInterface e.version newObjectID
+   in go 1
+
+handleEventResponse :: WaylandEvent -> Wayland ()
+handleEventResponse (Event h e)
+  | Just (ev :: EventGlobal) <- cast e = do
+      globals <- asks (.globals)
+      modifyIORef globals $ Map.insert ev.name (h, ev)
+handleEventResponse (Event _ e)
+  | Just (ev :: EventWlrLayerSurfaceConfigure) <- cast e = do
+      serial <- asks (.serial)
+      atomically $ putTMVar serial ev.serial
+handleEventResponse (EvEmpty _ e)
+  | Just (_ :: EventBufferRelease) <- cast e =
+      takeMVar =<< asks (.freeBuffer)
+handleEventResponse _ = return ()
+
+getBarState :: IO BarState
+getBarState = do
+  (dateOut, _dateErr) <- readProcess_ "date"
+  let dateFinal = BSL.reverse . BSL.drop 1 $ BSL.reverse dateOut
+  pure . BarState $ decodeUtf8 dateFinal
+
+renderBarState :: Font -> BarState -> Image PixelRGBA8
+renderBarState font barState = do
+  let bgColor = PixelRGBA8 0 0 0 0
+      drawColor = PixelRGBA8 213 196 161 255 -- #d5c4a1
+  renderDrawing (fromIntegral bufferWidth) (fromIntegral bufferHeight) bgColor $ do
+    withTexture (uniformTexture drawColor) $ do
+      printTextAt font (PointSize 11) (V2 20 15) $ toString barState.date
+
+main :: IO ()
+main = do
+  runReaderT program =<< waylandSetup
+
+waylandSetup :: IO WaylandEnv
+waylandSetup = do
+  sock <- wlDisplayConnect
+  counter <- newIORef 2 -- start from 2 because wl_display is always 1
+  globals <- newIORef mempty
+  objects <- newIORef mempty
+  serial <- newEmptyTMVarIO
+
+  WaylandEnv sock counter globals objects serial <$> newEmptyMVar
+
+program :: Wayland ()
+program = do
+  env <- ask
+  registryID <- wlDisplay_getRegistry
+
+  liftIO
+    . void
+    . forkIO
+    $ finally
+      (putStrLn "\n--- Starting event loop ---" >> runReaderT eventLoop env)
+      (close env.socket)
+
+  wlShmID <- bindToInterface registryID env.globals "wl_shm"
+  wlCompositorID <- bindToInterface registryID env.globals "wl_compositor"
+  zwlrLayerShellV1ID <- bindToInterface registryID env.globals "zwlr_layer_shell_v1"
+
+  wlSurfaceID <- wlCompositor_createSurface wlCompositorID
+  --
+  layerSurfaceID <- zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID 2 "saybar"
+  zwlrLayerSurfaceV1_setAnchor layerSurfaceID 13 -- top left right anchors
+  zwlrLayerSurfaceV1_setSize layerSurfaceID 0 bufferHeight
+  zwlrLayerSurfaceV1_setExclusiveZone layerSurfaceID (fromIntegral bufferHeight)
+  wlSurface_commit wlSurfaceID
+  zwlrLayerSurfaceV1_ackConfigure layerSurfaceID
+
+  font <- either (error . toText) pure =<< liftIO (loadFontFile "CourierPrime-Regular.ttf")
+
+  let makeSharedMemoryObject = shmOpen poolName (ShmOpenFlags True True False True) (Relude.foldl' unionFileModes ownerWriteMode [ownerReadMode])
+      removeSharedMemoryObject _ = shmUnlink poolName
+      useSharedMemoryObject fileDescriptor =
+        flip runReaderT env $ do
+          let frameSize = bufferWidth * bufferHeight * colorChannels
+          let poolSize = 2 * frameSize -- 2x for double buffering
+          liftIO . setFdSize fileDescriptor $ fromIntegral poolSize
+          wlShmPoolID <- wlShm_createPool wlShmID poolSize fileDescriptor
+          bufferA <- wlShmPool_createBuffer wlShmPoolID 0 bufferWidth bufferHeight colorChannels colorFormat
+          bufferB <- wlShmPool_createBuffer wlShmPoolID frameSize bufferWidth bufferHeight colorChannels colorFormat
+
+          fileHandle <- liftIO $ fdToHandle fileDescriptor
+
+          let renderLoop = do
+                img <- renderBarState font <$> liftIO getBarState
+                putImage wlSurfaceID fileHandle img bufferA
+
+                img2 <- renderBarState font <$> liftIO getBarState
+                putImage wlSurfaceID fileHandle img2 bufferB
+                renderLoop
+          renderLoop
+
+  liftIO . void $ bracket makeSharedMemoryObject removeSharedMemoryObject useSharedMemoryObject
+
+putImage :: Word32 -> Handle -> Image PixelRGBA8 -> Buffer -> Wayland ()
+putImage wlSurfaceID fileHandle image buffer = do
+  freeBuffer <- asks (.freeBuffer)
+  liftIO . hSeek fileHandle AbsoluteSeek $ fromIntegral buffer.offset
+  liftIO . hPut fileHandle $ swizzleRGBAtoBGRA image
+  wlSurface_damageBuffer wlSurfaceID 0 0 bufferWidth bufferHeight
+  wlSurface_attach wlSurfaceID buffer.id
+  wlSurface_commit wlSurfaceID
+  liftIO $ threadDelay 100000
+  putMVar freeBuffer ()

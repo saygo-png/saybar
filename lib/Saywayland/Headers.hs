@@ -1,4 +1,4 @@
-module Headers (Header (..)) where
+module Saywayland.Headers (Header (..)) where
 
 import Data.Binary
 import Data.Binary.Get
@@ -10,7 +10,7 @@ data Header = Header
   { objectID :: Word32
   , opCode :: Word16
   , size :: Word16
-  }
+  } deriving stock (Show)
 
 instance Binary Header where
   put :: Header -> Put
