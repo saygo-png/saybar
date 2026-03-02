@@ -21,8 +21,8 @@ findInterface globals targetInterface =
   let target = targetInterface <> "\0"
    in find (\(_, e) -> target `BSL.isPrefixOf` e.interface) globals >>= Just . snd
 
-bindToInterface :: Word32 -> IORef Globals -> BSL.ByteString -> Wayland Word32
-bindToInterface registryID globalsRef targetInterface =
+bindToInterface :: Word32 -> IORef Globals -> BSL.ByteString ->  WaylandInterface -> Wayland Word32
+bindToInterface registryID globalsRef targetInterface waylandInterface =
   let go (count :: Int) = do
         when
           (count >= 10)
@@ -34,5 +34,5 @@ bindToInterface registryID globalsRef targetInterface =
           Nothing -> liftIO (threadDelay 100000) >> go (count + 1)
           Just e -> do
             newObjectID <- liftIO $ nextID env.counter
-            wlRegistry_bind registryID e.name targetInterface e.version newObjectID
+            wlRegistry_bind registryID waylandInterface e.name targetInterface e.version newObjectID
    in go 1

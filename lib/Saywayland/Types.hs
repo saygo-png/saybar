@@ -11,7 +11,9 @@ data WaylandInterface
   = WlSurface
   | WlShmPool
   | WlBuffer
+  | WlCompositor
   | ZwlrLayerSurfaceV1
+  | ZwlrLayerShellV1
   | WlDisplay
   | WlRegistry
   | WlShm

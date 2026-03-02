@@ -66,7 +66,6 @@ waylandSetup = do
 program :: Wayland ()
 program = do
   env <- ask
-  registryID <- wlDisplay_getRegistry
 
   liftIO
     . void
@@ -75,9 +74,12 @@ program = do
       (putStrLn "\n--- Starting event loop ---" >> runReaderT eventLoop env)
       (close env.socket)
 
-  wlShmID <- bindToInterface registryID env.globals "wl_shm"
-  wlCompositorID <- bindToInterface registryID env.globals "wl_compositor"
-  zwlrLayerShellV1ID <- bindToInterface registryID env.globals "zwlr_layer_shell_v1"
+  liftIO $ threadDelay 10000
+  registryID <- wlDisplay_getRegistry
+
+  wlShmID <- bindToInterface registryID env.globals "wl_shm" WlShm
+  wlCompositorID <- bindToInterface registryID env.globals "wl_compositor" WlCompositor
+  zwlrLayerShellV1ID <- bindToInterface registryID env.globals "zwlr_layer_shell_v1" ZwlrLayerShellV1
 
   wlSurfaceID <- wlCompositor_createSurface wlCompositorID
   --

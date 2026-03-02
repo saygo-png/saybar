@@ -152,8 +152,8 @@ wlShmPool_createBuffer wlShmPoolID offset bufferWidth bufferHeight colorChannels
   modifyIORef env.objects (Map.insert newObjectID WlBuffer)
   return $ Buffer newObjectID offset
 
-wlRegistry_bind :: Word32 -> Word32 -> ByteString -> Word32 -> Word32 -> Wayland Word32
-wlRegistry_bind registryID globalName interfaceName interfaceVersion newObjectID = do
+wlRegistry_bind :: Word32 -> WaylandInterface -> Word32 -> ByteString -> Word32 -> Word32 -> Wayland Word32
+wlRegistry_bind registryID waylandInterface globalName interfaceName interfaceVersion newObjectID = do
   env <- ask
   let messageBody = runPut $ do
         putWord32le globalName
@@ -171,6 +171,8 @@ wlRegistry_bind registryID globalName interfaceName interfaceVersion newObjectID
       (BSL.unpackChars interfaceName)
       interfaceVersion
       newObjectID
+
+  modifyIORef env.objects (Map.insert newObjectID waylandInterface)
   return newObjectID
 
 wlCompositor_createSurface :: Word32 -> Wayland Word32
