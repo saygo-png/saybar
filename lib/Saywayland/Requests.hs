@@ -1,5 +1,6 @@
 module Saywayland.Requests (wlDisplay_getRegistry, wlShm_createPool, wlSurface_attach, zwlrLayerShellV1_getLayerSurface, zwlrLayerSurfaceV1_setAnchor, zwlrLayerSurfaceV1_setSize, zwlrLayerSurfaceV1_ackConfigure, zwlrLayerSurfaceV1_setExclusiveZone, wlShmPool_createBuffer, wlRegistry_bind, wlCompositor_createSurface, wlSurface_commit, wlSurface_damageBuffer) where
 
+import Control.Exception (assert)
 import Data.Binary
 import Data.Binary.Put
 import Data.ByteString qualified as BS
@@ -9,8 +10,8 @@ import Data.Map qualified as Map
 import Network.Socket.ByteString (sendManyWithFds)
 import Network.Socket.ByteString.Lazy
 import Relude hiding (ByteString, get, isPrefixOf, length, put, replicate)
-import Saywayland.Types
 import Saywayland.Internal.Utils
+import Saywayland.Types
 import System.Posix.Types
 import Text.Printf
 
@@ -20,10 +21,12 @@ wlDisplay_getRegistry :: Wayland Word32
 wlDisplay_getRegistry = do
   env <- ask
   registryID <- nextID env.counter
+  -- The object here is actually saved before the request is sent
+  -- This is because the registry id is needed for parsing its requests/events
+  modifyIORef env.objects (Map.insert registryID WlRegistry)
   let messageBody = runPut $ putWord32le registryID
   liftIO . sendAll env.socket $ mkMessage wlDisplayID 1 messageBody
   liftIO . strReq ("wl_display", wlDisplayID, "get_registry") $ printf "wl_registry=%i" registryID
-  modifyIORef env.objects (Map.insert registryID WlRegistry)
   return registryID
 
 wlShm_createPool :: Word32 -> Word32 -> Fd -> Wayland Word32
@@ -83,7 +86,6 @@ zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID layer namespace 
   liftIO
     . strReq sender
     $ printf "newID=%i wl_surface=%i output=%i layer=%i namespace=%s" newObjectID wlSurfaceID waylandNull layer (BSL.unpackChars namespace)
-
 
   modifyIORef env.objects (Map.insert newObjectID ZwlrLayerSurfaceV1)
   return newObjectID

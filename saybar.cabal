@@ -31,4 +31,4 @@ executable saybar
   hs-source-dirs: src
   main-is:        Main.hs
   build-depends: saywayland
-  other-modules: Types, Config
+  other-modules: Types, Config, Bar

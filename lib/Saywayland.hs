@@ -33,14 +33,13 @@ eventLoop :: Wayland ()
 eventLoop = do
   env <- ask
   msg <- liftIO $ receiveSocketData env.socket
-  unless (BSL.null msg)
-    $ processBuffer (BS.toStrict msg)
+  unless (BSL.null msg) $ processBuffer (BS.toStrict msg)
   eventLoop
 
 processBuffer :: BS.ByteString -> Wayland ()
 processBuffer bytes = do
   env <- ask
-  objects <- liftIO $ readIORef env.objects -- fresh read before EACH event
+  objects <- liftIO $ readIORef env.objects
   case pushChunk (runGetIncremental (parseEvent objects)) bytes of
     Done remaining _ event -> do
       liftIO $ displayEvent event
