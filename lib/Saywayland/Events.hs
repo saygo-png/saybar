@@ -1,9 +1,7 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingVia #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+
+{- HLINT ignore "Use camelCase" -}
 
 module Saywayland.Events (module Saywayland.Events) where
 
@@ -18,14 +16,15 @@ import Saywayland.Headers
 import Saywayland.Internal.Utils
 import Text.Printf
 
-data WaylandEvent where
-  Event :: (Binary a, WaylandEventType a, Typeable a) => Header -> a -> WaylandEvent
-  EvEmpty :: (WaylandEventType a, Typeable a) => Header -> a -> WaylandEvent
-  EvUnknown :: Header -> WaylandEvent
-
--- Type class for events that can describe themselves
-class WaylandEventType a where
-  formatEvent :: Word32 -> a -> String
+data WaylandEvent
+  = EvWlDisplay_error Header BodyWlDisplay_error
+  | EvWlDisplay_deleteID Header BodyWlDisplay_deleteId
+  | EvGlobal Header BodyGlobal
+  | EvWlShm_format Header BodyWlShm_format
+  | EvWlrLayerSurface_configure Header BodyWlrLayerSurface_configure
+  | EvExtWorkspaceManagerV1_workspace Header BodyExtWorkspaceManagerV1_workspace
+  | EvBufferRelease Header
+  | EvUnknown Header
 
 -- Generic little-endian Binary deriving
 type GBinaryLE :: forall {k}. (k -> Type) -> Constraint
@@ -45,7 +44,6 @@ instance (GBinaryLE a) => GBinaryLE (M1 i c a) where
   ggetLE = M1 <$> ggetLE
   gputLE (M1 x) = gputLE x
 
--- Instances for primitive types
 instance GBinaryLE (K1 i Word32) where
   ggetLE = K1 <$> getWord32le
   gputLE (K1 x) = putWord32le x
@@ -58,7 +56,6 @@ instance GBinaryLE (K1 i ByteString) where
   ggetLE = K1 <$> getWlString
   gputLE (K1 x) = putWlString x
 
--- Wayland array type - typed array with length-prefixed wire format
 type role WlArray representational
 
 newtype WlArray a = WlArray [a]
@@ -84,99 +81,93 @@ instance (Generic a, GBinaryLE (Rep a)) => Binary (LittleEndian a) where
   get = LittleEndian . to <$> ggetLE
   put (LittleEndian x) = gputLE (from x)
 
-type Globals = Map Word32 (Header, EventGlobal)
+type Globals = Map Word32 (Header, BodyGlobal)
 
-data EventGlobal = EventGlobal
+data BodyGlobal = EventGlobal
   { name :: Word32
   , interface :: ByteString
   , version :: Word32
   }
   deriving stock (Generic, Show)
-  deriving (Binary) via (LittleEndian EventGlobal)
+  deriving (Binary) via (LittleEndian BodyGlobal)
 
-instance WaylandEventType EventGlobal where
-  formatEvent objId e =
-    printf
-      "wl_registry@%i.global: name=%i interface=\"%s\" version=%i"
-      objId
-      e.name
-      (unpackChars e.interface)
-      e.version
-
-newtype EventShmFormat = EventShmFormat {format :: Word32}
+newtype BodyWlShm_format = EventShmFormat {format :: Word32}
   deriving stock (Generic, Show)
-  deriving (Binary) via (LittleEndian EventShmFormat)
+  deriving (Binary) via (LittleEndian BodyWlShm_format)
 
-instance WaylandEventType EventShmFormat where
-  formatEvent objId e =
-    printf
-      "wl_shm@%i.format: format=%s (%i)"
-      objId
-      (formatName e.format)
-      e.format
-
-data EventDisplayError = EventDisplayError
+data BodyWlDisplay_error = EventDisplayError
   { errorObjectId :: Word32
   , errorCode :: Word32
   , errorMessage :: ByteString
   }
   deriving stock (Generic, Show)
-  deriving (Binary) via (LittleEndian EventDisplayError)
+  deriving (Binary) via (LittleEndian BodyWlDisplay_error)
 
-instance WaylandEventType EventDisplayError where
-  formatEvent objId e =
-    printf
-      "wl_display@%i.error: object_id=%i code=%i message=\"%s\""
-      objId
-      e.errorObjectId
-      e.errorCode
-      (unpackChars e.errorMessage)
-
-newtype EventDisplayDeleteId = EventDisplayDeleteId {deletedId :: Word32}
+newtype BodyWlDisplay_deleteId = EventDisplayDeleteId {deletedId :: Word32}
   deriving stock (Generic, Show)
-  deriving (Binary) via (LittleEndian EventDisplayDeleteId)
+  deriving (Binary) via (LittleEndian BodyWlDisplay_deleteId)
 
-instance WaylandEventType EventDisplayDeleteId where
-  formatEvent objId e =
-    printf "wl_display@%i.delete_id: id=%i" objId e.deletedId
-
-data EventBufferRelease = EventBufferRelease
-  deriving stock (Generic, Show)
-
-instance WaylandEventType EventBufferRelease where
-  formatEvent objId _e =
-    printf "wl_buffer@%i.release: buffer released" objId
-
-data EventWlrLayerSurfaceConfigure = EventWlrLayerSurfaceConfigure
+data BodyWlrLayerSurface_configure = EventWlrLayerSurfaceConfigure
   { serial :: Word32
   , width :: Word32
   , height :: Word32
   }
   deriving stock (Generic, Show)
-  deriving (Binary) via (LittleEndian EventWlrLayerSurfaceConfigure)
+  deriving (Binary) via (LittleEndian BodyWlrLayerSurface_configure)
 
-instance WaylandEventType EventWlrLayerSurfaceConfigure where
-  formatEvent objId e =
+newtype BodyExtWorkspaceManagerV1_workspace = EventExtWorkspaceManagerV1_workspace
+  { handleID :: Word32
+  }
+  deriving stock (Generic, Show)
+  deriving (Binary) via (LittleEndian BodyExtWorkspaceManagerV1_workspace)
+
+-- Single function replacing the WaylandEventType typeclass
+formatEvent :: WaylandEvent -> String
+formatEvent = \case
+  EvWlDisplay_error h e ->
+    printf
+      "wl_display@%i.error: object_id=%i code=%i message=\"%s\""
+      h.objectID
+      e.errorObjectId
+      e.errorCode
+      (unpackChars e.errorMessage)
+  EvWlDisplay_deleteID h e ->
+    printf "wl_display@%i.delete_id: id=%i" h.objectID e.deletedId
+  EvGlobal h e ->
+    printf
+      "wl_registry@%i.global: name=%i interface=\"%s\" version=%i"
+      h.objectID
+      e.name
+      (unpackChars e.interface)
+      e.version
+  EvWlShm_format h e ->
+    printf
+      "wl_shm@%i.format: format=%s (%i)"
+      h.objectID
+      (formatName e.format)
+      e.format
+  EvWlrLayerSurface_configure h e ->
     printf
       "zwlr_layer_surface_v1@%i.configure: serial=%i width=%i height=%i"
-      objId
+      h.objectID
       e.serial
       e.width
       e.height
+  EvExtWorkspaceManagerV1_workspace h e ->
+    printf
+      "ext_workspace_manager_v1@%i.workspace: handle=%i"
+      h.objectID
+      e.handleID
+  EvBufferRelease h ->
+    printf "wl_buffer@%i.release: buffer released" h.objectID
+  EvUnknown h ->
+    printf "<- unknown event: objectID=%i opCode=%i size=%i" h.objectID h.opCode h.size
 
--- Single display function that works for all events
 displayEvent :: WaylandEvent -> IO ()
-displayEvent (Event h e) = putStrLn $ "<- " <> formatEvent h.objectID e
-displayEvent (EvEmpty h e) = putStrLn $ "<- " <> formatEvent h.objectID e
-displayEvent (EvUnknown h) = putStrLn $ printf "<- unknown event: objectID=%i opCode=%i size=%i" h.objectID h.opCode h.size
+displayEvent ev = putStrLn $ "<- " <> formatEvent ev
 
 -- Format names for wl_shm
 formatName :: Word32 -> String
 formatName 0 = "ARGB8888"
 formatName 1 = "XRGB8888"
 formatName n = "format_" <> show n
-
--- Helper to create events
-mkEvent :: (Binary a, WaylandEventType a, Typeable a) => Header -> a -> WaylandEvent
-mkEvent = Event
-

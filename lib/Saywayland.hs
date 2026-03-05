@@ -5,7 +5,6 @@ import Data.Binary.Get hiding (remaining)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
 import Data.Map qualified as Map
-import Data.Typeable
 import Relude hiding (get)
 import Saywayland.Events
 import Saywayland.Headers
@@ -18,15 +17,14 @@ parseEvent :: Map Word32 WaylandInterface -> Get WaylandEvent
 parseEvent objects = do
   header <- get
   let bodySize = fromIntegral header.size - 8
-      ev :: (Binary a, WaylandEventType a, Typeable a) => Get a -> Get WaylandEvent
-      ev = fmap (Event header)
   case (Map.lookup header.objectID objects, header.opCode) of
-    (Just WlDisplay, 0) -> ev (get @EventDisplayError)
-    (Just WlDisplay, 1) -> ev (get @EventDisplayDeleteId)
-    (Just WlRegistry, 0) -> ev (get @EventGlobal)
-    (Just WlShm, 0) -> ev (get @EventShmFormat)
-    (Just ZwlrLayerSurfaceV1, 0) -> ev (get @EventWlrLayerSurfaceConfigure)
-    (Just WlBuffer, 0) -> pure $ EvEmpty header EventBufferRelease
+    (Just WlDisplay, 0) -> EvWlDisplay_error header <$> get
+    (Just WlDisplay, 1) -> EvWlDisplay_deleteID header <$> get
+    (Just WlRegistry, 0) -> EvGlobal header <$> get
+    (Just WlShm, 0) -> EvWlShm_format header <$> get
+    (Just ZwlrLayerSurfaceV1, 0) -> EvWlrLayerSurface_configure header <$> get
+    (Just ExtWorkspaceManagerV1, 1) -> EvExtWorkspaceManagerV1_workspace header <$> get
+    (Just WlBuffer, 0) -> pure $ EvBufferRelease header
     _ -> skip bodySize $> EvUnknown header
 
 eventLoop :: Wayland ()
@@ -52,15 +50,11 @@ processBuffer bytes = do
       liftIO $ putStrLn $ "Parse error: " <> err
 
 handleEventResponse :: WaylandEvent -> Wayland ()
-handleEventResponse (Event h e)
-  | Just (ev :: EventGlobal) <- cast e = do
-      globals <- asks (.globals)
-      modifyIORef globals $ Map.insert ev.name (h, ev)
-handleEventResponse (Event _ e)
-  | Just (ev :: EventWlrLayerSurfaceConfigure) <- cast e = do
-      serial <- asks (.serial)
-      atomically $ putTMVar serial ev.serial
-handleEventResponse (EvEmpty _ e)
-  | Just (_ :: EventBufferRelease) <- cast e =
-      takeMVar =<< asks (.freeBuffer)
+handleEventResponse (EvBufferRelease _) = takeMVar =<< asks (.freeBuffer)
+handleEventResponse (EvGlobal h ev) = do
+  globals <- asks (.globals)
+  modifyIORef globals $ Map.insert ev.name (h, ev)
+handleEventResponse (EvWlrLayerSurface_configure _ ev) = do
+  serial <- asks (.serial)
+  atomically $ putTMVar serial ev.serial
 handleEventResponse _ = return ()

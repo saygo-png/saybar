@@ -1,6 +1,5 @@
 module Saywayland.Requests (wlDisplay_getRegistry, wlShm_createPool, wlSurface_attach, zwlrLayerShellV1_getLayerSurface, zwlrLayerSurfaceV1_setAnchor, zwlrLayerSurfaceV1_setSize, zwlrLayerSurfaceV1_ackConfigure, zwlrLayerSurfaceV1_setExclusiveZone, wlShmPool_createBuffer, wlRegistry_bind, wlCompositor_createSurface, wlSurface_commit, wlSurface_damageBuffer) where
 
-import Control.Exception (assert)
 import Data.Binary
 import Data.Binary.Put
 import Data.ByteString qualified as BS

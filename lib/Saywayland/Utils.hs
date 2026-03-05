@@ -16,7 +16,7 @@ nextID counter = do
   modifyIORef counter (+ 1)
   return current
 
-findInterface :: Globals -> BSL.ByteString -> Maybe EventGlobal
+findInterface :: Globals -> BSL.ByteString -> Maybe BodyGlobal
 findInterface globals targetInterface =
   let target = targetInterface <> "\0"
    in find (\(_, e) -> target `BSL.isPrefixOf` e.interface) globals >>= Just . snd
