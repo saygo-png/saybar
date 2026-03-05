@@ -18,6 +18,7 @@ data WaylandInterface
   | WlRegistry
   | WlShm
   | ExtWorkspaceManagerV1
+  | ExtWorkspaceHandleV1
   deriving stock (Show)
 
 data Serial = Serial

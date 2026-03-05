@@ -52,6 +52,7 @@ program = do
   wlShmID <- bindToInterface registryID env.globals "wl_shm" WlShm
   wlCompositorID <- bindToInterface registryID env.globals "wl_compositor" WlCompositor
   zwlrLayerShellV1ID <- bindToInterface registryID env.globals "zwlr_layer_shell_v1" ZwlrLayerShellV1
+  extWorkspaceManagerV1ID <- bindToInterface registryID env.globals "ext_workspace_manager_v1" ExtWorkspaceManagerV1
 
   wlSurfaceID <- wlCompositor_createSurface wlCompositorID
   layerSurfaceID <- zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID 2 "saybar"

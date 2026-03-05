@@ -50,7 +50,7 @@ getColorize = do
 strReq :: (String, Word32, String) -> String -> IO ()
 strReq (object, objectID, method) text = do
   colorize <- getColorize
-  putStrLn . colorize Vivid Magenta $ printf ("-> %s@%i.%s: " <> text) object objectID method
+  putStrLn . colorize Vivid Magenta $ printf ("        -> %s@%i.%s: " <> text) object objectID method
 
 mkMessage :: Word32 -> Word16 -> ByteString -> ByteString
 mkMessage objectID opCode messageBody =

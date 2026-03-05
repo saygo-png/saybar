@@ -54,7 +54,8 @@ wlSurface_attach wlSurfaceID wlBufferID = do
   liftIO . sendAll env.socket $ mkMessage wlSurfaceID 1 messageBody
 
   let sender = ("wl_surface", wlSurfaceID, "attach")
-  liftIO . strReq sender $ printf "bufferId=%i x=%i y=%i" wlBufferID (0 :: Int32) (0 :: Int32)
+  pure ()
+  -- liftIO . strReq sender $ printf "bufferId=%i x=%i y=%i" wlBufferID (0 :: Int32) (0 :: Int32)
 
 wlSurface_damageBuffer :: Word32 -> Int32 -> Int32 -> Word32 -> Word32 -> Wayland ()
 wlSurface_damageBuffer wlSurfaceID x y width height = do
@@ -67,7 +68,19 @@ wlSurface_damageBuffer wlSurfaceID x y width height = do
   liftIO . sendAll env.socket $ mkMessage wlSurfaceID 9 messageBody
 
   let sender = ("wl_surface", wlSurfaceID, "damage_buffer")
-  liftIO . strReq sender $ printf "x=%i y=%i width=%i height=%i" x y width height
+  pure ()
+  -- liftIO . strReq sender $ printf "x=%i y=%i width=%i height=%i" x y width height
+
+wlSurface_commit :: Word32 -> Wayland ()
+wlSurface_commit wlSurfaceID = do
+  env <- ask
+
+  let messageBody = runPut mempty
+  liftIO . sendAll env.socket $ mkMessage wlSurfaceID 6 messageBody
+
+  let sender = ("wl_surface", wlSurfaceID, "commit")
+  pure ()
+  -- liftIO $ strReq sender "commit request"
 
 zwlrLayerShellV1_getLayerSurface :: Word32 -> Word32 -> Word32 -> ByteString -> Wayland Word32
 zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID layer namespace = do
@@ -188,13 +201,3 @@ wlCompositor_createSurface wlCompositorID = do
   liftIO . strReq sender $ printf "newID=%i" newObjectID
   modifyIORef env.objects (Map.insert newObjectID WlSurface)
   return newObjectID
-
-wlSurface_commit :: Word32 -> Wayland ()
-wlSurface_commit wlSurfaceID = do
-  env <- ask
-
-  let messageBody = runPut mempty
-  liftIO . sendAll env.socket $ mkMessage wlSurfaceID 6 messageBody
-
-  let sender = ("wl_surface", wlSurfaceID, "commit")
-  liftIO $ strReq sender "commit request"
