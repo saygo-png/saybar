@@ -83,17 +83,17 @@ data BodyExtWorkspaceManagerV1_done = BodyExtWorkspaceManagerV1_done
   deriving (Binary) via (LittleEndian BodyExtWorkspaceManagerV1_done)
 
 newtype BodyExtWorkspaceHandleV1_id = BodyExtWorkspaceHandleV1_id
-  {id :: Word32}
+  {id :: ByteString}
   deriving stock (Generic, Show)
   deriving (Binary) via (LittleEndian BodyExtWorkspaceHandleV1_id)
 
 newtype BodyExtWorkspaceHandleV1_name = BodyExtWorkspaceHandleV1_name
-  {name :: Word32}
+  {name :: ByteString}
   deriving stock (Generic, Show)
   deriving (Binary) via (LittleEndian BodyExtWorkspaceHandleV1_name)
 
 newtype BodyExtWorkspaceHandleV1_coordinates = BodyExtWorkspaceHandleV1_coordinates
-  {coordinates :: Word32}
+  {coordinates :: WlArray Word32}
   deriving stock (Generic, Show)
   deriving (Binary) via (LittleEndian BodyExtWorkspaceHandleV1_coordinates)
 
@@ -121,9 +121,9 @@ formatEvent = \case
   EvExtWorkspaceManagerV1_workspace h e -> printf "ext_workspace_manager_v1@%i.workspace: handle=%i" h.objectID e.handleID
   EvExtWorkspaceManagerV1_workspaceGroup h e -> printf "ext_workspace_manager_v1@%i.workspace_group handle=%i: " h.objectID e.handleID
   EvExtWorkspaceManagerV1_done h _ -> printf "ext_workspace_manager_v1@%i.done: done sending workspace info" h.objectID
-  EvExtWorkspaceHandleV1_id h e -> printf "ext_workspace_handle_v1@%i.id: id=%i" h.objectID e.id
-  EvExtWorkspaceHandleV1_name h e -> printf "ext_workspace_handle_v1@%i.name: name=%s" h.objectID e.name
-  EvExtWorkspaceHandleV1_coordinates h e -> printf "ext_workspace_handle_v1@%i.coordinates: coordinates=%i" h.objectID e.coordinates
+  EvExtWorkspaceHandleV1_id h e -> printf "ext_workspace_handle_v1@%i.id: id=%s" h.objectID (unpackChars e.id)
+  EvExtWorkspaceHandleV1_name h e -> printf "ext_workspace_handle_v1@%i.name: name=%s" h.objectID (unpackChars e.name)
+  EvExtWorkspaceHandleV1_coordinates h e -> printf "ext_workspace_handle_v1@%i.coordinates: coordinates=%s" h.objectID (show @Text e.coordinates)
   EvExtWorkspaceHandleV1_state h e -> printf "ext_workspace_handle_v1@%i.state: state=%i" h.objectID e.state
   EvExtWorkspaceHandleV1_capabilities h e -> printf "ext_workspace_handle_v1@%i.capabilities: capabilities=%i" h.objectID e.capabilities
   EvExtWorkspaceHandleV1_removed h _ -> printf "ext_workspace_handle_v1@%i.removed: removed" h.objectID

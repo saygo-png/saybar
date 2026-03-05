@@ -26,9 +26,9 @@ parseEvent objects = do
     (Just ZwlrLayerSurfaceV1, 0) -> EvWlrLayerSurface_configure header <$> get
     (Just WlBuffer, 0) -> pure $ EvBufferRelease header
     --
-    (Just ExtWorkspaceManagerV1, 1) -> EvExtWorkspaceManagerV1_workspace header <$> get
     (Just ExtWorkspaceManagerV1, 0) -> EvExtWorkspaceManagerV1_workspaceGroup header <$> get
-    (Just ExtWorkspaceManagerV1, 2) -> EvExtWorkspaceManagerV1_workspaceGroup header <$> get
+    (Just ExtWorkspaceManagerV1, 1) -> EvExtWorkspaceManagerV1_workspace header <$> get
+    (Just ExtWorkspaceManagerV1, 2) -> EvExtWorkspaceManagerV1_done header <$> get
     --
     (Just ExtWorkspaceHandleV1, 0) -> EvExtWorkspaceHandleV1_id header <$> get
     (Just ExtWorkspaceHandleV1, 1) -> EvExtWorkspaceHandleV1_name header <$> get
