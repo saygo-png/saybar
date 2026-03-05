@@ -1,34 +1,106 @@
-cabal-version:   2.4
-name:            saybar
-version:         0
-build-type:      Simple
-author:          saygo-png
-maintainer:      saygo-png <saygo.mail@proton.me>
-copyright:       2024 saygo-png
+cabal-version: 2.4
+name:          saybar
+version:       0
+build-type:    Simple
+author:        saygo-png
+maintainer:    saygo-png <saygo.mail@proton.me>
+copyright:     2024 saygo-png
 
 common common-options
-  build-depends:    base >=4.7 && <5, relude
-  default-language: GHC2021
-  ghc-options: -Weverything -Wno-missed-extra-shared-lib -Wno-missing-kind-signatures -Wno-safe -Wno-unsafe -Wno-missing-import-lists -Wno-all-missed-specialisations -Wno-missed-specialisations -Wno-missing-safe-haskell-mode -Wno-missing-exported-signatures -Wno-missing-local-signatures
-               -threaded -rtsopts -with-rtsopts=-N
-  default-extensions: NoImplicitPrelude NoFieldSelectors OverloadedRecordDot DuplicateRecordFields BangPatterns BinaryLiterals ConstraintKinds DataKinds DefaultSignatures DeriveDataTypeable DeriveFoldable DeriveFunctor DeriveGeneric DeriveTraversable DoAndIfThenElse EmptyDataDecls ExistentialQuantification FlexibleContexts FlexibleInstances FunctionalDependencies GADTs GeneralizedNewtypeDeriving InstanceSigs KindSignatures LambdaCase MultiParamTypeClasses MultiWayIf NamedFieldPuns OverloadedStrings PartialTypeSignatures PatternGuards PolyKinds RankNTypes ScopedTypeVariables StandaloneDeriving TupleSections TypeFamilies TypeSynonymInstances ViewPatterns DerivingStrategies RoleAnnotations
+  build-depends:
+    , base    >=4.7 && <5
+    , relude
+
+  default-language:   GHC2021
+  ghc-options:
+    -Weverything -Wno-missed-extra-shared-lib
+    -Wno-missing-kind-signatures -Wno-safe -Wno-unsafe
+    -Wno-missing-import-lists -Wno-all-missed-specialisations
+    -Wno-missed-specialisations -Wno-missing-safe-haskell-mode
+    -Wno-missing-exported-signatures -Wno-missing-local-signatures
+    -threaded
+
+  default-extensions:
+    BangPatterns
+    BinaryLiterals
+    ConstraintKinds
+    DataKinds
+    DefaultSignatures
+    DeriveDataTypeable
+    DeriveFoldable
+    DeriveFunctor
+    DeriveGeneric
+    DeriveTraversable
+    DerivingStrategies
+    DoAndIfThenElse
+    DuplicateRecordFields
+    EmptyDataDecls
+    ExistentialQuantification
+    FlexibleContexts
+    FlexibleInstances
+    FunctionalDependencies
+    GADTs
+    GeneralizedNewtypeDeriving
+    InstanceSigs
+    KindSignatures
+    LambdaCase
+    MultiParamTypeClasses
+    MultiWayIf
+    NamedFieldPuns
+    NoFieldSelectors
+    NoImplicitPrelude
+    OverloadedRecordDot
+    OverloadedStrings
+    PartialTypeSignatures
+    PatternGuards
+    PolyKinds
+    RankNTypes
+    RoleAnnotations
+    ScopedTypeVariables
+    StandaloneDeriving
+    TupleSections
+    TypeFamilies
+    TypeSynonymInstances
+    ViewPatterns
 
 library saywayland
-  import:         common-options
-  build-depends:  containers, bytestring, binary, network, vector, ansi-terminal
-  hs-source-dirs: lib
-  exposed-modules: Saywayland,
-                   Saywayland.Events,
-                   Saywayland.Headers,
-                   Saywayland.Utils,
-                   Saywayland.Requests,
-                   Saywayland.Types
-                   Saywayland.Internal.Utils
+  import:          common-options
+  build-depends:
+    , ansi-terminal
+    , binary
+    , bytestring
+    , containers
+    , network
+
+  hs-source-dirs:  lib
+  exposed-modules:
+    Saywayland
+    Saywayland.Events
+    Saywayland.Headers
+    Saywayland.Internal.Utils
+    Saywayland.Requests
+    Saywayland.Types
+    Saywayland.Utils
 
 executable saybar
   import:         common-options
-  build-depends: bytestring, binary, network, unix, Rasterific, FontyFruity, JuicyPixels, vector, ansi-terminal, typed-process, containers
+  build-depends:
+    , binary
+    , bytestring
+    , containers
+    , FontyFruity
+    , JuicyPixels
+    , network
+    , Rasterific
+    , typed-process
+    , unix
+    , vector
+
+  ghc-options:    -rtsopts -with-rtsopts=-N
   hs-source-dirs: src
   main-is:        Main.hs
-  build-depends: saywayland
-  other-modules: Types, Config, Bar
+  build-depends:  saywayland
+  other-modules:
+    Bar
+    Config
+    Types
