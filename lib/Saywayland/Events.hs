@@ -16,6 +16,21 @@ import Saywayland.Headers
 import Saywayland.Internal.Utils
 import Text.Printf
 
+
+data WaylandInterface
+  = WlSurface
+  | WlShmPool
+  | WlBuffer
+  | WlCompositor
+  | ZwlrLayerSurfaceV1
+  | ZwlrLayerShellV1
+  | WlDisplay
+  | WlRegistry
+  | WlShm
+  | ExtWorkspaceManagerV1
+  | ExtWorkspaceHandleV1
+  deriving stock (Show)
+
 data WaylandEvent
   = EvWlDisplay_error Header BodyWlDisplay_error
   | EvWlDisplay_deleteID Header BodyWlDisplay_deleteId

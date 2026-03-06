@@ -1,25 +1,11 @@
-module Saywayland.Types (WaylandInterface (..), Wayland, WaylandEnv (..), Buffer (..), Serial (..)) where
+module Saywayland.Types (Wayland, WaylandEnv (..), Buffer (..), Serial (..)) where
 
 import Data.Binary
 import Network.Socket
 import Relude hiding (ByteString, get, isPrefixOf, length, put, replicate)
-import Saywayland.Events (Globals)
+import Saywayland.Events (Globals, WaylandInterface)
 
 type Wayland = ReaderT WaylandEnv IO
-
-data WaylandInterface
-  = WlSurface
-  | WlShmPool
-  | WlBuffer
-  | WlCompositor
-  | ZwlrLayerSurfaceV1
-  | ZwlrLayerShellV1
-  | WlDisplay
-  | WlRegistry
-  | WlShm
-  | ExtWorkspaceManagerV1
-  | ExtWorkspaceHandleV1
-  deriving stock (Show)
 
 data Serial = Serial
   { serialCode :: Word32
