@@ -50,9 +50,16 @@ data WaylandInterface
   | WlDisplay
   | WlRegistry
   | WlShm
+  | WlOutput
   | ExtWorkspaceManagerV1
   | ExtWorkspaceHandleV1
+  | ExtWorkspaceGroupHandleV1
   deriving stock (Show)
+
+type role ObjectID phantom
+
+newtype ObjectID (a :: WaylandInterface) = ObjectID {id :: Word32}
+  deriving newtype (PrintfArg, Num, Show)
 
 -- These must be defined before the splice: WlArray is referenced via ''WlArray,
 -- and LittleEndian appears in every generated 'deriving (Binary) via' clause.
@@ -77,8 +84,8 @@ newtype LittleEndian a = LittleEndian a
 
 $( declareEvents
      --
-     [ event "WlDisplay" 0 "error" [("errorObjectID", ty ''Word32), ("errorCode", ty ''WlUint), ("errorMessage", ty ''WlString)]
-     , event "WlDisplay" 1 "deleteID" [("deletedID", ty ''Word32)]
+     [ event "WlDisplay" 0 "error" [("errorObjectID", ty ''WlID), ("errorCode", ty ''WlUint), ("errorMessage", ty ''WlString)]
+     , event "WlDisplay" 1 "deleteID" [("deletedID", ty ''WlID)]
      , --
        event "WlRegistry" 0 "global" [("name", ty ''WlUint), ("interface", ty ''WlString), ("version", ty ''WlUint)]
      , --
@@ -86,9 +93,9 @@ $( declareEvents
      , --
        event "ZwlrLayerSurfaceV1" 0 "configure" [("serial", ty ''WlUint), ("width", ty ''WlUint), ("height", ty ''WlUint)]
      , --
-       event "ExtWorkspaceManagerV1" 0 "workspaceGroup" [("handleID", ty ''Word32)]
-     , event "ExtWorkspaceManagerV1" 1 "workspace" [("handleID", ty ''Word32)]
-     , event "ExtWorkspaceManagerV1" 2 "done" [] -- no payload
+       event "ExtWorkspaceManagerV1" 0 "workspaceGroup" [("handleID", appTy ''ObjectID 'ExtWorkspaceGroupHandleV1)]
+     , event "ExtWorkspaceManagerV1" 1 "workspace" [("handleID", appTy ''ObjectID 'ExtWorkspaceHandleV1)]
+     , event "ExtWorkspaceManagerV1" 2 "done" []
      , --
        event "ExtWorkspaceHandleV1" 0 "id" [("id", ty ''WlString)]
      , event "ExtWorkspaceHandleV1" 1 "name" [("name", ty ''WlString)]
@@ -96,6 +103,13 @@ $( declareEvents
      , event "ExtWorkspaceHandleV1" 3 "state" [("state", ty ''Word32)]
      , event "ExtWorkspaceHandleV1" 4 "capabilities" [("capabilities", ty ''Word32)]
      , event "ExtWorkspaceHandleV1" 5 "removed" []
+     , --
+       event "ExtWorkspaceGroupHandleV1" 0 "capabilities" [("capabilities", ty ''WlUint)]
+     , event "ExtWorkspaceGroupHandleV1" 1 "output_enter" [("output", appTy ''ObjectID 'WlOutput)]
+     , event "ExtWorkspaceGroupHandleV1" 2 "output_leave" [("output", appTy ''ObjectID 'WlOutput)]
+     , event "ExtWorkspaceGroupHandleV1" 3 "workspace_enter" [("workspace", appTy ''ObjectID 'ExtWorkspaceHandleV1)]
+     , event "ExtWorkspaceGroupHandleV1" 4 "workspace_leave" [("workspace", appTy ''ObjectID 'ExtWorkspaceHandleV1)]
+     , event "ExtWorkspaceGroupHandleV1" 5 "removed" []
      , --
        event "WlBuffer" 0 "release" []
      ]
@@ -105,11 +119,6 @@ $( declareEvents
 Defined here (after the splice) so BodyWlRegistry_global is in scope.
 -}
 type Globals = Map Word32 (Header, BodyWlRegistry_global)
-
-type role ObjectID phantom
-
-newtype ObjectID (a :: WaylandInterface) = ObjectID {id :: Word32}
-  deriving newtype (PrintfArg, Num, Show)
 
 data Serial = Serial
   { serialCode :: Word32
@@ -121,7 +130,7 @@ data WaylandEnv = WaylandEnv
   { socket :: Socket
   , counter :: IORef Word32
   , globals :: IORef Globals
-  , objects :: IORef (Map Word32 WaylandInterface)
+  , objects :: IORef (Map WlID WaylandInterface)
   , serial :: TMVar Word32
   , freeBuffer :: MVar ()
   }
@@ -341,6 +350,12 @@ formatEvent = \case
   EvExtWorkspaceHandleV1_state h e -> printf "ext_workspace_handle_v1@%i.state: state=%i" h.objectID e.state
   EvExtWorkspaceHandleV1_capabilities h e -> printf "ext_workspace_handle_v1@%i.capabilities: capabilities=%i" h.objectID e.capabilities
   EvExtWorkspaceHandleV1_removed h _ -> printf "ext_workspace_handle_v1@%i.removed: removed" h.objectID
+  EvExtWorkspaceGroupHandleV1_capabilities h e -> printf "ext_workspace_group_handle_v1@%i.capabilities: capabilities=%i" h.objectID e.capabilities
+  EvExtWorkspaceGroupHandleV1_output_enter h e -> printf "ext_workspace_group_handle_v1@%i.output_enter: output=%i" h.objectID e.output
+  EvExtWorkspaceGroupHandleV1_output_leave h e -> printf "ext_workspace_group_handle_v1@%i.output_leave: output=%i" h.objectID e.output
+  EvExtWorkspaceGroupHandleV1_workspace_enter h e -> printf "ext_workspace_group_handle_v1@%i.workspace_enter: output=%i" h.objectID e.workspace
+  EvExtWorkspaceGroupHandleV1_workspace_leave h e -> printf "ext_workspace_group_handle_v1@%i.workspace_leave: output=%i" h.objectID e.workspace
+  EvExtWorkspaceGroupHandleV1_removed h _ -> printf "ext_workspace_group_handle_v1@%i.removed: removed" h.objectID
   EvWlBuffer_release h _ -> printf "wl_buffer@%i.release: buffer released" h.objectID
   EvUnknown h -> printf "???: objectID=%i opCode=%i size=%i" h.objectID h.opCode h.size
 
@@ -390,7 +405,10 @@ handleEventResponse (EvZwlrLayerSurfaceV1_configure _ ev) = do
   atomically $ putTMVar serial ev.serial
 handleEventResponse (EvExtWorkspaceManagerV1_workspace _ ev) = do
   objects <- asks (.objects)
-  modifyIORef objects $ Map.insert ev.handleID ExtWorkspaceHandleV1
+  modifyIORef objects $ Map.insert (coerce ev.handleID) ExtWorkspaceHandleV1 -- This is stupid
+handleEventResponse (EvExtWorkspaceManagerV1_workspaceGroup _ ev) = do
+  objects <- asks (.objects)
+  modifyIORef objects $ Map.insert (coerce ev.handleID) ExtWorkspaceGroupHandleV1 -- This is stupid
 handleEventResponse _ = return ()
 
 -- }}}
@@ -417,6 +435,10 @@ instance (GBinaryLE a) => GBinaryLE (M1 i c a) where
 instance GBinaryLE (K1 i Word32) where
   ggetLE = K1 <$> getWord32le
   gputLE (K1 x) = putWord32le x
+
+instance GBinaryLE (K1 i (ObjectID a)) where
+  ggetLE = K1 <$> coerce getWord32le
+  gputLE (K1 x) = putWord32le $ coerce x
 
 instance GBinaryLE (K1 i Int32) where
   ggetLE = K1 <$> getInt32le

@@ -8,7 +8,6 @@ import Codec.Picture.Types (Image)
 import Config
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Exception
-import Data.Binary
 import Data.ByteString.Lazy hiding (count)
 import GHC.IO.Handle
 import Graphics.Text.TrueType (loadFontFile)
