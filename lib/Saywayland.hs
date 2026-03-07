@@ -58,7 +58,7 @@ data WaylandInterface
 
 type role ObjectID phantom
 
-newtype ObjectID (a :: WaylandInterface) = ObjectID {id :: Word32}
+newtype ObjectID (a :: WaylandInterface) = ObjectID {id :: WlID}
   deriving newtype (PrintfArg, Num, Show)
 
 type role WlArray representational
@@ -110,20 +110,20 @@ $( declareEvents
  )
 
 -- | Globals storage by name.
-type Globals = Map Word32 (Header, BodyWlRegistry_global)
+type Globals = Map WlUint (Header, BodyWlRegistry_global)
 
 data Serial = Serial
-  { serialCode :: Word32
+  { serialCode :: WlUint
   , originInterface :: WaylandInterface
-  , originID :: Word32
+  , originID :: WlID
   }
 
 data WaylandEnv = WaylandEnv
   { socket :: Socket
-  , counter :: IORef Word32
+  , counter :: IORef WlID
   , globals :: IORef Globals
   , objects :: IORef (Map WlID WaylandInterface)
-  , serial :: TMVar Word32
+  , serial :: TMVar WlUint
   , freeBuffer :: MVar ()
   }
 
@@ -135,7 +135,7 @@ data Buffer = Buffer
   }
 
 data Header = Header
-  { objectID :: Word32
+  { objectID :: WlID
   , opCode :: Word16
   , size :: Word16
   }
@@ -240,7 +240,7 @@ zwlrLayerSurfaceV1_setAnchor zwlrLayerSurfaceV1ID anchor = do
   let messageBody = runPut $ putWord32le anchor
   liftIO $ sendAll env.socket $ mkMessage zwlrLayerSurfaceV1ID 1 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "set_anchor")
-  liftIO . strReq sender $ printf "anchor=%i" anchor
+  liftIO . strReq sender $ "anchor=" <> show anchor
 
 zwlrLayerSurfaceV1_setSize :: ObjectID 'ZwlrLayerSurfaceV1 -> WlUint -> WlUint -> Wayland ()
 zwlrLayerSurfaceV1_setSize zwlrLayerSurfaceV1ID width height = do
@@ -250,7 +250,7 @@ zwlrLayerSurfaceV1_setSize zwlrLayerSurfaceV1ID width height = do
         putWord32le height
   liftIO . sendAll env.socket $ mkMessage zwlrLayerSurfaceV1ID 0 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "set_size")
-  liftIO . strReq sender $ printf "width=%i height=%i" width height
+  liftIO . strReq sender $ "width=" <> show width <> "height=" <> show height
 
 zwlrLayerSurfaceV1_ackConfigure :: ObjectID 'ZwlrLayerSurfaceV1 -> Wayland ()
 zwlrLayerSurfaceV1_ackConfigure zwlrLayerSurfaceV1ID = do
@@ -259,7 +259,7 @@ zwlrLayerSurfaceV1_ackConfigure zwlrLayerSurfaceV1ID = do
   let messageBody = runPut $ do putWord32le serial
   liftIO . sendAll env.socket $ mkMessage zwlrLayerSurfaceV1ID 6 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "ack_configure")
-  liftIO . strReq sender $ printf "serial=%i" serial
+  liftIO . strReq sender $ "serial=" <> show serial
 
 zwlrLayerSurfaceV1_setExclusiveZone :: ObjectID 'ZwlrLayerSurfaceV1 -> WlInt -> Wayland ()
 zwlrLayerSurfaceV1_setExclusiveZone zwlrLayerSurfaceV1ID zone = do
@@ -286,7 +286,7 @@ wlShmPool_createBuffer wlShmPoolID offset bufferWidth bufferHeight colorChannels
   modifyIORef env.objects (Map.insert newObjectID WlBuffer)
   return $ Buffer (coerce newObjectID) offset
 
-wlRegistry_bind :: ObjectID 'WlRegistry -> WaylandInterface -> WlUint -> WlString -> WlUint -> Word32 -> Wayland (ObjectID a)
+wlRegistry_bind :: ObjectID 'WlRegistry -> WaylandInterface -> WlUint -> WlString -> WlUint -> WlID -> Wayland (ObjectID a)
 wlRegistry_bind registryID waylandInterface globalName interfaceName interfaceVersion newObjectID = do
   env <- ask
   let messageBody = runPut $ do
@@ -298,12 +298,17 @@ wlRegistry_bind registryID waylandInterface globalName interfaceName interfaceVe
   let sender = ("wl_registry", registryID, "bind")
   liftIO
     . strReq sender
-    $ printf
-      "name=%i interface=\"%s\" version=%i id=%i"
-      globalName
-      (BSL.unpackChars interfaceName)
-      interfaceVersion
-      newObjectID
+    $ mconcat
+      [ "name="
+      , show globalName
+      , " interface="
+      , BSL.unpackChars interfaceName
+      , " version="
+      , show interfaceVersion
+      , "id="
+      , show newObjectID
+      ]
+
   modifyIORef env.objects (Map.insert newObjectID waylandInterface)
   return $ coerce newObjectID
 
@@ -339,7 +344,7 @@ formatEvent = \case
   EvExtWorkspaceHandleV1_state h e -> printf "ext_workspace_handle_v1@%i.state: state=%i" h.objectID e.state
   EvExtWorkspaceHandleV1_capabilities h e -> printf "ext_workspace_handle_v1@%i.capabilities: capabilities=%i" h.objectID e.capabilities
   EvExtWorkspaceHandleV1_removed h _ -> printf "ext_workspace_handle_v1@%i.removed: removed" h.objectID
-  EvExtWorkspaceGroupHandleV1_capabilities h e -> printf "ext_workspace_group_handle_v1@%i.capabilities: capabilities=%i" h.objectID e.capabilities
+  EvExtWorkspaceGroupHandleV1_capabilities h e -> "ext_workspace_group_handle_v1@" <> show h.objectID <> ".capabilities: capabilities=" <> show e.capabilities
   EvExtWorkspaceGroupHandleV1_output_enter h e -> printf "ext_workspace_group_handle_v1@%i.output_enter: output=%i" h.objectID e.output
   EvExtWorkspaceGroupHandleV1_output_leave h e -> printf "ext_workspace_group_handle_v1@%i.output_leave: output=%i" h.objectID e.output
   EvExtWorkspaceGroupHandleV1_workspace_enter h e -> printf "ext_workspace_group_handle_v1@%i.workspace_enter: output=%i" h.objectID e.workspace
@@ -526,11 +531,6 @@ getColorize = do
 strReq :: (String, ObjectID a, String) -> String -> IO ()
 strReq (object, objectID, method) text = do
   colorize <- getColorize
-  putStrLn . colorize Vivid Magenta $ printf ("        -> %s@%i.%s: " <> text) object objectID method
-
-strReq2 :: (String, ObjectID a, String) -> String -> IO ()
-strReq2 (object, objectID, method) text = do
-  colorize <- getColorize
   putStrLn . colorize Vivid Magenta $ mconcat ["        -> ", object, "@", show objectID, ".", method, ": ", text]
 
 mkMessage :: ObjectID a -> Word16 -> BSL.ByteString -> BSL.ByteString
@@ -554,13 +554,13 @@ receiveSocketData :: Socket -> IO BSL.ByteString
 receiveSocketData sock = do
   liftIO $ recv sock 4096
 
-nextID' :: IORef Word32 -> IO Word32
+nextID' :: IORef WlID -> IO WlID
 nextID' counter = do
   current <- readIORef counter
   modifyIORef counter (+ 1)
   return current
 
-nextID :: (MonadIO m) => IORef Word32 -> m Word32
+nextID :: (MonadIO m) => IORef WlID -> m WlID
 nextID = liftIO . nextID'
 
 -- }}}
