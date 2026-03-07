@@ -1,5 +1,7 @@
 {-# LANGUAGE TemplateHaskellQuotes #-}
 
+-- All this garbage is vibecoded because I want to avoid event boilerplate and don't know template haskell.
+
 {- |
 Module      : SaywaylandTH
 Description : Template Haskell macros to eliminate Wayland event boilerplate.

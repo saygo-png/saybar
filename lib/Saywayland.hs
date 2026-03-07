@@ -61,9 +61,6 @@ type role ObjectID phantom
 newtype ObjectID (a :: WaylandInterface) = ObjectID {id :: Word32}
   deriving newtype (PrintfArg, Num, Show)
 
--- These must be defined before the splice: WlArray is referenced via ''WlArray,
--- and LittleEndian appears in every generated 'deriving (Binary) via' clause.
-
 type role WlArray representational
 
 newtype WlArray a = WlArray [a]
@@ -73,14 +70,11 @@ type role LittleEndian representational
 
 newtype LittleEndian a = LittleEndian a
 
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
--- THE ONLY THING YOU NEED TO EDIT TO ADD A NEW EVENT:
---
--- Add one line to the list below.  Template Haskell generates:
---   * Body<Interface>_<name>  – data type (Generic, Show, Binary)
---   * Ev<Interface>_<name>    – constructor in WaylandEvent
---   * (Just <Interface>, n)   – case arm in parseEvent
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- | Colour format used in shm buffers.
+data WlColorFormat
+  = Argb8888
+  | Xrgb8888
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 $( declareEvents
      --
@@ -115,9 +109,7 @@ $( declareEvents
      ]
  )
 
-{- | Maps the registry name to its global event body.
-Defined here (after the splice) so BodyWlRegistry_global is in scope.
--}
+-- | Globals storage by name.
 type Globals = Map Word32 (Header, BodyWlRegistry_global)
 
 data Serial = Serial
@@ -330,10 +322,7 @@ wlCompositor_createSurface wlCompositorID = do
 
 -- Event helpers {{{
 
-{- | Format a received event as a human-readable string.
-Add a case here when you add a new event whose output you care about,
-otherwise the default 'show' on the body is used.
--}
+-- | Format a received event as a pretty string.
 formatEvent :: WaylandEvent -> String
 formatEvent = \case
   EvWlDisplay_error h e -> printf "wl_display@%i.error: object_id=%i code=%i message=%s" h.objectID e.errorObjectID e.errorCode (BSL.unpackChars e.errorMessage)
@@ -362,7 +351,7 @@ formatEvent = \case
 displayEvent :: WaylandEvent -> IO ()
 displayEvent ev = putStrLn $ "<- " <> formatEvent ev
 
--- Color format names
+-- Color format names.
 formatName :: Word32 -> String
 formatName 0 = "ARGB8888"
 formatName 1 = "XRGB8888"
@@ -413,7 +402,7 @@ handleEventResponse _ = return ()
 
 -- }}}
 
--- Generic little-endian Binary deriving {{{
+-- Vibecoded generic little-endian Binary deriving {{{
 
 type GBinaryLE :: forall {k}. (k -> Type) -> Constraint
 class GBinaryLE f where
@@ -520,12 +509,6 @@ wlColorFormatXrgb8888 = 1
 
 wlDisplayID :: ObjectID 'WlDisplay
 wlDisplayID = 1 -- wlDisplay always has ID 1 in Wayland
-
--- | Colour format used in shm buffers.
-data WlColorFormat
-  = Argb8888
-  | Xrgb8888
-  deriving stock (Eq, Ord, Show, Enum, Bounded)
 
 -- | Convert a format to its Wayland wire value.
 formatValue :: WlColorFormat -> Word32
