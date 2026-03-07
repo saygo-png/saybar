@@ -71,9 +71,10 @@ library saywayland
     , bytestring
     , containers
     , network
+    , template-haskell
 
   hs-source-dirs:  lib
-  exposed-modules: Saywayland
+  exposed-modules: Saywayland, SaywaylandTH
 
 executable saybar
   import:         common-options
