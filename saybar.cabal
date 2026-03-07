@@ -73,14 +73,7 @@ library saywayland
     , network
 
   hs-source-dirs:  lib
-  exposed-modules:
-    Saywayland
-    Saywayland.Events
-    Saywayland.Headers
-    Saywayland.Internal.Utils
-    Saywayland.Requests
-    Saywayland.Types
-    Saywayland.Utils
+  exposed-modules: Saywayland
 
 executable saybar
   import:         common-options

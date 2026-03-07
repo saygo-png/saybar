@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import Bar
 import Codec.Picture (PixelRGBA8 (..))
 import Codec.Picture.Types (Image)
 import Config
@@ -14,11 +15,9 @@ import Graphics.Text.TrueType (loadFontFile)
 import Network.Socket
 import Relude hiding (ByteString, get, isPrefixOf, put)
 import Saywayland
-import Saywayland.Internal.Utils
 import System.Posix (ownerReadMode, ownerWriteMode, setFdSize, unionFileModes)
 import System.Posix.IO
 import System.Posix.SharedMem
-import Bar
 
 main :: IO ()
 main = do
@@ -57,8 +56,8 @@ program = do
   wlSurfaceID <- wlCompositor_createSurface wlCompositorID
   layerSurfaceID <- zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID 2 "saybar"
   zwlrLayerSurfaceV1_setAnchor layerSurfaceID 13 -- top left right anchors
-  zwlrLayerSurfaceV1_setSize layerSurfaceID 0 bufferHeight
-  zwlrLayerSurfaceV1_setExclusiveZone layerSurfaceID (fromIntegral bufferHeight)
+  zwlrLayerSurfaceV1_setSize layerSurfaceID 0 $ fromIntegral bufferHeight
+  zwlrLayerSurfaceV1_setExclusiveZone layerSurfaceID bufferHeight
   wlSurface_commit wlSurfaceID
   zwlrLayerSurfaceV1_ackConfigure layerSurfaceID
 
@@ -71,9 +70,9 @@ program = do
           let frameSize = bufferWidth * bufferHeight * colorChannels
           let poolSize = 2 * frameSize -- 2x for double buffering
           liftIO . setFdSize fileDescriptor $ fromIntegral poolSize
-          wlShmPoolID <- wlShm_createPool wlShmID poolSize fileDescriptor
-          bufferA <- wlShmPool_createBuffer wlShmPoolID 0 bufferWidth bufferHeight colorChannels colorFormat
-          bufferB <- wlShmPool_createBuffer wlShmPoolID frameSize bufferWidth bufferHeight colorChannels colorFormat
+          wlShmPoolID <- wlShm_createPool wlShmID fileDescriptor poolSize
+          bufferA <- wlShmPool_createBuffer wlShmPoolID 0 bufferWidth bufferHeight colorChannels Argb8888
+          bufferB <- wlShmPool_createBuffer wlShmPoolID frameSize bufferWidth bufferHeight colorChannels Argb8888
 
           fileHandle <- liftIO $ fdToHandle fileDescriptor
 
@@ -88,7 +87,7 @@ program = do
 
   liftIO . void $ bracket makeSharedMemoryObject removeSharedMemoryObject useSharedMemoryObject
 
-putImage :: Word32 -> Handle -> Image PixelRGBA8 -> Buffer -> Wayland ()
+putImage :: ObjectID 'WlSurface -> Handle -> Image PixelRGBA8 -> Buffer -> Wayland ()
 putImage wlSurfaceID fileHandle image buffer = do
   freeBuffer <- asks (.freeBuffer)
   liftIO . hSeek fileHandle AbsoluteSeek $ fromIntegral buffer.offset

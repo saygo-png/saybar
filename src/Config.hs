@@ -1,11 +1,12 @@
 module Config (colorChannels, bufferWidth, bufferHeight, poolName, colorFormat) where
 
+import Saywayland
 import Relude
 
-bufferWidth :: Word32
+bufferWidth :: WlInt
 bufferWidth = 1920
 
-bufferHeight :: Word32
+bufferHeight :: WlInt
 bufferHeight = 20
 
 poolName :: String
@@ -14,5 +15,5 @@ poolName = "saybar-shared-pool"
 colorFormat :: Word32
 colorFormat = 0 -- ARGB8888
 
-colorChannels :: Word32
+colorChannels :: WlInt
 colorChannels = 4
