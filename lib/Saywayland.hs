@@ -37,9 +37,7 @@ type WlUint = Word32
 
 type WlInt = Int32
 
-{- | Every interface that can appear as the object of a Wayland event.
-Add a new constructor here when a new interface is introduced.
--}
+-- | Every interface that can appear as the object of a Wayland event.
 data WaylandInterface
   = WlSurface
   | WlShmPool
@@ -70,7 +68,7 @@ type role LittleEndian representational
 
 newtype LittleEndian a = LittleEndian a
 
--- | Colour format used in shm buffers.
+-- | Type representing Wayland color formats.
 data WlColorFormat
   = Argb8888
   | Xrgb8888
@@ -112,6 +110,7 @@ $( declareEvents
 -- | Globals storage by name.
 type Globals = Map WlUint (Header, BodyWlRegistry_global)
 
+-- | Type representing a Wayland serial code with some context.
 data Serial = Serial
   { serialCode :: WlUint
   , originInterface :: WaylandInterface
@@ -125,15 +124,18 @@ data WaylandEnv = WaylandEnv
   , objects :: IORef (Map WlID WaylandInterface)
   , serial :: TMVar WlUint
   , freeBuffer :: MVar ()
+  , eventHandlers :: IORef [WaylandEvent -> Wayland ()]
   }
 
 type Wayland = ReaderT WaylandEnv IO
 
+-- | Type representing a Wayland buffer.
 data Buffer = Buffer
   { id :: ObjectID 'WlBuffer
   , offset :: WlInt
   }
 
+-- | Type representing a Wayland header.
 data Header = Header
   { objectID :: WlID
   , opCode :: Word16
@@ -330,33 +332,35 @@ wlCompositor_createSurface wlCompositorID = do
 -- | Format a received event as a pretty string.
 formatEvent :: WaylandEvent -> String
 formatEvent = \case
-  EvWlDisplay_error h e -> printf "wl_display@%i.error: object_id=%i code=%i message=%s" h.objectID e.errorObjectID e.errorCode (BSL.unpackChars e.errorMessage)
-  EvWlDisplay_deleteID h e -> printf "wl_display@%i.delete_id: id=%i" h.objectID e.deletedID
-  EvWlRegistry_global h e -> printf "wl_registry@%i.global: name=%i interface=%s version=%i" h.objectID e.name (BSL.unpackChars e.interface) e.version
-  EvWlShm_format h e -> printf "wl_shm@%i.format: format=%s (%i)" h.objectID (formatName e.format) e.format
-  EvZwlrLayerSurfaceV1_configure h e -> printf "zwlr_layer_surface_v1@%i.configure: serial=%i width=%i height=%i" h.objectID e.serial e.width e.height
-  EvExtWorkspaceManagerV1_workspace h e -> printf "ext_workspace_manager_v1@%i.workspace: handle=%i" h.objectID e.handleID
-  EvExtWorkspaceManagerV1_workspaceGroup h e -> printf "ext_workspace_manager_v1@%i.workspace_group: handle=%i" h.objectID e.handleID
-  EvExtWorkspaceManagerV1_done h _ -> printf "ext_workspace_manager_v1@%i.done: done sending workspace info" h.objectID
-  EvExtWorkspaceHandleV1_id h e -> printf "ext_workspace_handle_v1@%i.id: id=%s" h.objectID (BSL.unpackChars e.id)
-  EvExtWorkspaceHandleV1_name h e -> printf "ext_workspace_handle_v1@%i.name: name=%s" h.objectID (BSL.unpackChars e.name)
-  EvExtWorkspaceHandleV1_coordinates h e -> printf "ext_workspace_handle_v1@%i.coordinates: coordinates=%s" h.objectID (show @Text e.coordinates)
-  EvExtWorkspaceHandleV1_state h e -> printf "ext_workspace_handle_v1@%i.state: state=%i" h.objectID e.state
-  EvExtWorkspaceHandleV1_capabilities h e -> printf "ext_workspace_handle_v1@%i.capabilities: capabilities=%i" h.objectID e.capabilities
-  EvExtWorkspaceHandleV1_removed h _ -> printf "ext_workspace_handle_v1@%i.removed: removed" h.objectID
-  EvExtWorkspaceGroupHandleV1_capabilities h e -> "ext_workspace_group_handle_v1@" <> show h.objectID <> ".capabilities: capabilities=" <> show e.capabilities
-  EvExtWorkspaceGroupHandleV1_output_enter h e -> printf "ext_workspace_group_handle_v1@%i.output_enter: output=%i" h.objectID e.output
-  EvExtWorkspaceGroupHandleV1_output_leave h e -> printf "ext_workspace_group_handle_v1@%i.output_leave: output=%i" h.objectID e.output
-  EvExtWorkspaceGroupHandleV1_workspace_enter h e -> printf "ext_workspace_group_handle_v1@%i.workspace_enter: output=%i" h.objectID e.workspace
-  EvExtWorkspaceGroupHandleV1_workspace_leave h e -> printf "ext_workspace_group_handle_v1@%i.workspace_leave: output=%i" h.objectID e.workspace
-  EvExtWorkspaceGroupHandleV1_removed h _ -> printf "ext_workspace_group_handle_v1@%i.removed: removed" h.objectID
-  EvWlBuffer_release h _ -> printf "wl_buffer@%i.release: buffer released" h.objectID
-  EvUnknown h -> printf "???: objectID=%i opCode=%i size=%i" h.objectID h.opCode h.size
+  EvWlDisplay_error h e -> fmt "wl_display" h $ "error: object_id=" <> show e.errorObjectID <> " code=" <> show e.errorCode <> " message=" <> BSL.unpackChars e.errorMessage
+  EvWlDisplay_deleteID h e -> fmt "wl_display" h $ "delete_id: id=" <> show e.deletedID
+  EvWlRegistry_global h e -> fmt "wl_registry" h $ "global: name=" <> show e.name <> " interface=" <> BSL.unpackChars e.interface <> " version=" <> show e.version
+  EvWlShm_format h e -> fmt "wl_shm" h $ "format: format=" <> formatName e.format <> " (" <> show e.format <> ")"
+  EvZwlrLayerSurfaceV1_configure h e -> fmt "zwlr_layer_surface_v1" h $ "configure: serial=" <> show e.serial <> " width=" <> show e.width <> " height=" <> show e.height
+  EvExtWorkspaceManagerV1_workspace h e -> fmt "ext_workspace_manager_v1" h $ "workspace: handle=" <> show e.handleID
+  EvExtWorkspaceManagerV1_workspaceGroup h e -> fmt "ext_workspace_manager_v1" h $ "workspace_group: handle=" <> show e.handleID
+  EvExtWorkspaceManagerV1_done h _ -> fmt "ext_workspace_manager_v1" h "done: done sending workspace info"
+  EvExtWorkspaceHandleV1_id h e -> fmt "ext_workspace_handle_v1" h $ "id: id=" <> BSL.unpackChars e.id
+  EvExtWorkspaceHandleV1_name h e -> fmt "ext_workspace_handle_v1" h $ "name: name=" <> BSL.unpackChars e.name
+  EvExtWorkspaceHandleV1_coordinates h e -> fmt "ext_workspace_handle_v1" h $ "coordinates: coordinates=" <> show e.coordinates
+  EvExtWorkspaceHandleV1_state h e -> fmt "ext_workspace_handle_v1" h $ "state: state=" <> show e.state
+  EvExtWorkspaceHandleV1_capabilities h e -> fmt "ext_workspace_handle_v1" h $ "capabilities: capabilities=" <> show e.capabilities
+  EvExtWorkspaceHandleV1_removed h _ -> fmt "ext_workspace_handle_v1" h "removed: removed"
+  EvExtWorkspaceGroupHandleV1_capabilities h e -> fmt "ext_workspace_group_handle_v1" h $ "capabilities: capabilities=" <> show e.capabilities
+  EvExtWorkspaceGroupHandleV1_output_enter h e -> fmt "ext_workspace_group_handle_v1" h $ "output_enter: output=" <> show e.output
+  EvExtWorkspaceGroupHandleV1_output_leave h e -> fmt "ext_workspace_group_handle_v1" h $ "output_leave: output=" <> show e.output
+  EvExtWorkspaceGroupHandleV1_workspace_enter h e -> fmt "ext_workspace_group_handle_v1" h $ "workspace_enter: workspace=" <> show e.workspace
+  EvExtWorkspaceGroupHandleV1_workspace_leave h e -> fmt "ext_workspace_group_handle_v1" h $ "workspace_leave: workspace=" <> show e.workspace
+  EvExtWorkspaceGroupHandleV1_removed h _ -> fmt "ext_workspace_group_handle_v1" h "removed: removed"
+  EvWlBuffer_release h _ -> fmt "wl_buffer" h "release: buffer released"
+  EvUnknown h -> "UNKNOWN EVENT: objectID=" <> show h.objectID <> " opCode=" <> show h.opCode <> " size=" <> show h.size
+  where
+    fmt :: String -> Header -> String -> String
+    fmt interface h details = interface <> "@" <> show h.objectID <> "." <> details
 
-displayEvent :: WaylandEvent -> IO ()
-displayEvent ev = putStrLn $ "<- " <> formatEvent ev
-
--- Color format names.
+{- | Get the color format name based on the wayland value.
+| Non-exhaustive, formats not listed will be shown as "format_" and the number
+-}
 formatName :: Word32 -> String
 formatName 0 = "ARGB8888"
 formatName 1 = "XRGB8888"
@@ -366,6 +370,7 @@ formatName n = "format_" <> show n
 
 -- Event loop {{{
 
+-- | Core event loop. It reads the socket and processes the data using 'processBuffer'
 eventLoop :: Wayland ()
 eventLoop = do
   env <- ask
@@ -373,6 +378,11 @@ eventLoop = do
   unless (BSL.null msg) $ processBuffer (BS.toStrict msg)
   eventLoop
 
+{- | Processes the data from the wayland socket.
+It does nothing if the data is partial and waits for the next call.
+If the data is not partial, it parses events with 'parseEvent'
+then for each event it calls 'formatEvent' and 'handleEventResponse'
+-}
 processBuffer :: BS.ByteString -> Wayland ()
 processBuffer bytes = do
   env <- ask
@@ -385,25 +395,52 @@ processBuffer bytes = do
       handleEventResponse ev
       unless (BS.null remaining) $ processBuffer remaining
     Partial _ ->
-      return () -- incomplete message, wait for next socket read
+      return ()
     Fail _ _ err ->
       liftIO $ putStrLn $ "Parse error: " <> err
+  where
+    displayEvent :: WaylandEvent -> IO ()
+    displayEvent ev = putStrLn $ "<- " <> formatEvent ev
 
+{- | Event handler.
+Assigns objects, globals and performs other actions based on events.
+It also processes events through custom handlers defined by 'onEvent', after the internal ones.
+-}
 handleEventResponse :: WaylandEvent -> Wayland ()
-handleEventResponse (EvWlBuffer_release _ _) = takeMVar =<< asks (.freeBuffer)
-handleEventResponse (EvWlRegistry_global h ev) = do
-  globals <- asks (.globals)
-  modifyIORef globals $ Map.insert ev.name (h, ev)
-handleEventResponse (EvZwlrLayerSurfaceV1_configure _ ev) = do
-  serial <- asks (.serial)
-  atomically $ putTMVar serial ev.serial
-handleEventResponse (EvExtWorkspaceManagerV1_workspace _ ev) = do
-  objects <- asks (.objects)
-  modifyIORef objects $ Map.insert (coerce ev.handleID) ExtWorkspaceHandleV1 -- This is stupid
-handleEventResponse (EvExtWorkspaceManagerV1_workspaceGroup _ ev) = do
-  objects <- asks (.objects)
-  modifyIORef objects $ Map.insert (coerce ev.handleID) ExtWorkspaceGroupHandleV1 -- This is stupid
-handleEventResponse _ = return ()
+handleEventResponse ev = do
+  case ev of
+    (EvWlBuffer_release _ _) -> takeMVar =<< asks (.freeBuffer)
+    (EvWlRegistry_global h body) -> do
+      globals <- asks (.globals)
+      modifyIORef globals $ Map.insert body.name (h, body)
+    (EvZwlrLayerSurfaceV1_configure _ body) -> do
+      serial <- asks (.serial)
+      atomically $ putTMVar serial body.serial
+    (EvExtWorkspaceManagerV1_workspace _ body) -> do
+      objects <- asks (.objects)
+      modifyIORef objects $ Map.insert (coerce body.handleID) ExtWorkspaceHandleV1 -- This is stupid
+    (EvExtWorkspaceManagerV1_workspaceGroup _ body) -> do
+      objects <- asks (.objects)
+      modifyIORef objects $ Map.insert (coerce body.handleID) ExtWorkspaceGroupHandleV1 -- This is stupid
+    _ -> return ()
+
+  handlers <- liftIO . readIORef =<< asks (.eventHandlers)
+  mapM_ ($ ev) handlers
+
+{- | Register a handler to be called on every incoming Wayland event.
+Handlers are called in registration order after the library's own handlers.
+
+Example:
+
+> onEvent $ \case
+>   EvExtWorkspaceHandleV1_name h e ->
+>     liftIO $ modifyIORef myRef (Map.insert h.objectID (decodeUtf8 e.name))
+>   _ -> pure ()
+-}
+onEvent :: (WaylandEvent -> Wayland ()) -> Wayland ()
+onEvent handler = do
+  handlersRef <- asks (.eventHandlers)
+  liftIO $ modifyIORef handlersRef (handler :)
 
 -- }}}
 
@@ -461,11 +498,10 @@ instance (Generic a, GBinaryLE (Rep a)) => Binary (LittleEndian a) where
 
 -- Utils {{{
 
-findInterface :: Globals -> BSL.ByteString -> Maybe BodyWlRegistry_global
-findInterface globals targetInterface =
-  let target = targetInterface <> "\0"
-   in find (\(_, e) -> target `BSL.isPrefixOf` e.interface) globals >>= Just . snd
-
+{- | Bind to a Wayland interface. It looks at the advertised globals to find an interface.
+If it fails it recurses. It does this 10 times with a small delay.
+Prints an exception and exits with a fail if the interface is not found within 10 tries.
+-}
 bindToInterface :: ObjectID 'WlRegistry -> IORef Globals -> WlString -> WaylandInterface -> Wayland (ObjectID a)
 bindToInterface registryID globalsRef targetInterface waylandInterface =
   let go (count :: Int) = do
@@ -475,16 +511,23 @@ bindToInterface registryID globalsRef targetInterface waylandInterface =
         liftIO $ printf "Trying to bind to %s... (%i)\n" (BSL.unpackChars targetInterface) count
         env <- ask
         globals <- readIORef globalsRef
-        case findInterface globals targetInterface of
-          Nothing -> liftIO (threadDelay 100000) >> go (count + 1)
+        case findInterface globals of
+          Nothing -> liftIO (threadDelay $ 100 * 1000) >> go (count + 1)
           Just e -> do
             newObjectID <- liftIO $ nextID env.counter
             wlRegistry_bind registryID waylandInterface e.name targetInterface e.version newObjectID
    in go 1
+  where
+    findInterface :: Globals -> Maybe BodyWlRegistry_global
+    findInterface globals =
+      let target = targetInterface <> "\0"
+       in find (\(_, e) -> target `BSL.isPrefixOf` e.interface) globals >>= Just . snd
 
+-- | Utility function for encoding and decoding Wayland strings.
 padLen :: Word32 -> Int64
 padLen l = (.&.) (fromIntegral l + 3) (-4)
 
+-- | Encode a Wayland string type.
 putWlString :: WlString -> Put
 putWlString bs = do
   let str = bs <> "\0"
@@ -493,6 +536,7 @@ putWlString bs = do
   let paddingBytes = padLen (fromIntegral $ BSL.length str) - BSL.length str
   replicateM_ (fromIntegral paddingBytes) (putWord8 0)
 
+-- | Decode a Wayland string type.
 getWlString :: Get WlString
 getWlString = do
   len <- getWord32le
@@ -500,39 +544,51 @@ getWlString = do
   skip $ fromIntegral (padLen len - fromIntegral len)
   return str
 
+-- | The header size is always 8 in Wayland.
 headerSize :: Int64
-headerSize = 8 -- The header size is always 8 in Wayland
+headerSize = 8
 
+-- | Wayland null is just 0.
 waylandNull :: Word32
-waylandNull = 0 -- Nulls are just 0 in Wayland
+waylandNull = 0
 
+-- | The argb8888 format is 0.
 wlColorFormatArgb8888 :: WlInt
 wlColorFormatArgb8888 = 0
 
+-- | The argb8888 format is 1.
 wlColorFormatXrgb8888 :: WlInt
 wlColorFormatXrgb8888 = 1
 
+-- | wlDisplay always has ID 1 in Wayland.
 wlDisplayID :: ObjectID 'WlDisplay
-wlDisplayID = 1 -- wlDisplay always has ID 1 in Wayland
+wlDisplayID = 1
 
 -- | Convert a format to its Wayland wire value.
 formatValue :: WlColorFormat -> Word32
 formatValue Argb8888 = 0
 formatValue Xrgb8888 = 1
 
-getColorize :: (IsString s, Semigroup s) => IO (ColorIntensity -> Color -> s -> s)
-getColorize = do
-  ansiSupport <- hNowSupportsANSI stdout
-  pure
-    $ if ansiSupport
-      then \ci c t -> fromString (setSGRCode [SetColor Foreground ci c]) <> t <> fromString (setSGRCode [Reset])
-      else const $ const id
-
+{- | Convenience function for formatting events.
+Events are colored in magenta following the wayland.app colorscheme.
+-}
 strReq :: (String, ObjectID a, String) -> String -> IO ()
 strReq (object, objectID, method) text = do
   colorize <- getColorize
   putStrLn . colorize Vivid Magenta $ mconcat ["        -> ", object, "@", show objectID, ".", method, ": ", text]
+  where
+    getColorize :: (IsString s, Semigroup s) => IO (ColorIntensity -> Color -> s -> s)
+    getColorize = do
+      ansiSupport <- hNowSupportsANSI stdout
+      pure
+        $ if ansiSupport
+          then \ci c t -> fromString (setSGRCode [SetColor Foreground ci c]) <> t <> fromString (setSGRCode [Reset])
+          else const $ const id
 
+{- | Convenience function for formatting a Wayland message.
+It takes an objectID, operation code and a message body.
+The header is generated based on this, the size is derived automatically.
+-}
 mkMessage :: ObjectID a -> Word16 -> BSL.ByteString -> BSL.ByteString
 mkMessage objectID opCode messageBody =
   runPut $ do
@@ -541,8 +597,11 @@ mkMessage objectID opCode messageBody =
     putWord16le $ fromIntegral (headerSize + BSL.length messageBody)
     putLazyByteString messageBody
 
-wlDisplayConnect :: IO Socket
-wlDisplayConnect = do
+{- | Connect to the Wayland socket.
+The socket path is $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY
+-}
+connectToWlSocket :: IO Socket
+connectToWlSocket = do
   xdg_runtime_dir <- getEnv "XDG_RUNTIME_DIR"
   wayland_display <- getEnv "WAYLAND_DISPLAY"
   let path = xdg_runtime_dir <> "/" <> wayland_display
@@ -550,18 +609,19 @@ wlDisplayConnect = do
   connect sock (SockAddrUnix path)
   return sock
 
+-- | Receive data from the wayland socket.
 receiveSocketData :: Socket -> IO BSL.ByteString
 receiveSocketData sock = do
   liftIO $ recv sock 4096
 
-nextID' :: IORef WlID -> IO WlID
-nextID' counter = do
+{- | Generates a Wayland object ID from a counter.
+It does this by incrementing the counter by 1.
+-}
+nextID :: (MonadIO m) => IORef WlID -> m WlID
+nextID counter = do
   current <- readIORef counter
   modifyIORef counter (+ 1)
   return current
-
-nextID :: (MonadIO m) => IORef WlID -> m WlID
-nextID = liftIO . nextID'
 
 -- }}}
 

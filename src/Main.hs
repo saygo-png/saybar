@@ -29,9 +29,10 @@ waylandSetup = do
   globals <- newIORef mempty
   objects <- newIORef mempty
   serial <- newEmptyTMVarIO
-  let freeBuffer :: IO (MVar ()) = newEmptyMVar
+  freeBuffer <- newEmptyMVar
+  handlers <- newIORef mempty
 
-  WaylandEnv sock counter globals objects serial <$> freeBuffer
+  pure $ WaylandEnv sock counter globals objects serial freeBuffer handlers
 
 program :: Wayland ()
 program = do
