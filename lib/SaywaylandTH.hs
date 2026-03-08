@@ -1,7 +1,5 @@
 {-# LANGUAGE TemplateHaskellQuotes #-}
 
--- All this garbage is vibecoded because I want to avoid event boilerplate and don't know template haskell.
-
 {- |
 Module      : SaywaylandTH
 Description : Template Haskell macros to eliminate Wayland event boilerplate.
@@ -11,16 +9,20 @@ To add a new event, add one entry to the 'declareEvents' splice:
 @
 event "ExtWorkspaceHandleV1" 5 "removed" []
 event "WlDisplay" 0 "error"
-  [ ("errorObjectID", ty ''Word32)
+  [ ("errorObjectID", ty ''WlUint)
   , ("errorCode",     ty ''WlUint)
   , ("errorMessage",  ty ''WlString)
   ]
 @
 
 Each entry generates:
-  * A @Body\<Interface\>_\<name\>@ data type (with Generic\/Show\/Binary via LittleEndian)
+  * A @Body\<Interface\>_\<name\>@ data type (with Generic, Show, and Binary via anyclass)
   * An @Ev\<Interface\>_\<name\> Header Body…@ constructor in 'WaylandEvent'
   * A @(Just \<Interface\>, opCode)@ case in @parseEvent@
+
+The @Binary@ instances are derived via @anyclass@ and rely on each field type
+having a correct little-endian @Binary@ instance — see 'WlUint', 'WlInt',
+'WlString', 'ObjectID', and 'WlArray' in "Saywayland".
 -}
 module SaywaylandTH (
   EventSpec,
@@ -53,7 +55,7 @@ data EventSpec = EventSpec
 
 @
 event "WlDisplay" 0 "error"
-  [ ("errorObjectID", ty ''Word32)
+  [ ("errorObjectID", ty ''WlUint)
   , ("errorCode",     ty ''WlUint)
   , ("errorMessage",  ty ''WlString)
   ]
@@ -104,7 +106,10 @@ evConName es = mkName $ "Ev" ++ es.interface ++ "_" ++ es.name
 Zero fields  → @data Body… = Body…@
 One or more  → @data Body… = Body… { field :: Type, … }@
 
-Both variants derive @Generic@, @Show@, and @Binary@ via @LittleEndian@.
+Both variants derive @Generic@ and @Show@ via @stock@, and @Binary@ via
+@anyclass@. The @Binary@ instances are correct because every wire field type
+('WlUint', 'WlInt', 'WlString', 'ObjectID', 'WlArray') has its own
+little-endian @Binary@ instance.
 -}
 mkBodyDecl :: EventSpec -> Q [Dec]
 mkBodyDecl es = do
@@ -126,13 +131,10 @@ mkBodyDecl es = do
       -- deriving stock (Generic, Show)
       stockDeriv = DerivClause (Just StockStrategy) [ConT ''Generic, ConT ''Show]
 
-      -- deriving (Binary) via (LittleEndian Body…)
-      viaDeriv =
-        DerivClause
-          (Just (ViaStrategy (AppT (ConT (mkName "LittleEndian")) (ConT tyName))))
-          [ConT (mkName "Binary")]
+      -- deriving anyclass (Binary)
+      anyclassDeriv = DerivClause (Just AnyclassStrategy) [ConT (mkName "Binary")]
 
-      dataDec = DataD [] tyName [] Nothing [con] [stockDeriv, viaDeriv]
+      dataDec = DataD [] tyName [] Nothing [con] [stockDeriv, anyclassDeriv]
 
   pure [dataDec]
 
@@ -201,7 +203,7 @@ mkParseDecl specs = do
               , LitP (IntegerL (fromIntegral es.opCode))
               ]
           )
-          -- Body: Ev<Interface>_<name> header <$> get
+          -- Body: Ev<Interface>_<n> header <$> get
           ( NormalB
               $ InfixE
                 (Just (AppE (ConE (evConName es)) (VarE headerV)))
@@ -255,7 +257,7 @@ mkParseDecl specs = do
         SigD
           (mkName "parseEvent")
           ( ArrowT
-              `AppT` (ConT (mkName "Map") `AppT` ConT ''Word32 `AppT` ConT (mkName "WaylandInterface"))
+              `AppT` (ConT (mkName "Map") `AppT` ConT (mkName "WlUint") `AppT` ConT (mkName "WaylandInterface"))
               `AppT` (ConT (mkName "Get") `AppT` ConT (mkName "WaylandEvent"))
           )
 

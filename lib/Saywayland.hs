@@ -1,6 +1,5 @@
-{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE UndecidableInstances #-}
 
 {- HLINT ignore "Use camelCase" -}
 
@@ -15,11 +14,11 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
 import Data.ByteString.Lazy.Internal qualified as BSL
 import Data.Map qualified as Map
-import GHC.Generics
+import GHC.Show (Show (show))
 import Network.Socket (Family (AF_UNIX), SockAddr (SockAddrUnix), Socket, SocketType (Stream), connect, defaultProtocol, socket)
 import Network.Socket.ByteString (sendManyWithFds)
 import Network.Socket.ByteString.Lazy (recv, sendAll)
-import Relude hiding (ByteString, get, put)
+import Relude hiding (ByteString, get, put, show)
 import SaywaylandTH
 import System.Console.ANSI (Color (..), ColorIntensity (..), ConsoleLayer (..), SGR (..), hNowSupportsANSI, setSGRCode)
 import System.Environment (getEnv)
@@ -28,14 +27,48 @@ import Text.Printf (PrintfArg, printf)
 
 -- Types {{{
 
--- Wire types
-type WlString = BSL.ByteString
+-- | Wayland Uint
+newtype WlUint = WlUint {unWlUint :: Word32}
+  deriving newtype (Eq, Ord, Num, Integral, Real, Enum, PrintfArg, Show)
 
-type WlID = Word32
+instance Binary WlUint where
+  get = WlUint <$> getWord32le
+  put (WlUint x) = putWord32le x
 
-type WlUint = Word32
+-- | Wayland object IDs are Uint.
+type WlID = WlUint
 
-type WlInt = Int32
+-- | Wayland Int.
+newtype WlInt = WlInt {unWlInt :: Int32}
+  deriving newtype (Eq, Ord, Num, Integral, Real, Enum, Show)
+
+instance Binary WlInt where
+  get = WlInt <$> getInt32le
+  put (WlInt x) = putInt32le x
+
+-- | A Wayland length-prefixed, null-terminated, padded string on the wire.
+newtype WlString = WlString {unWlString :: BSL.ByteString}
+  deriving newtype (Eq, Ord, Semigroup, Monoid, IsString)
+
+instance Show WlString where
+  show = BSL.unpackChars . (.unWlString)
+
+-- | Round a byte length up to the nearest 4-byte boundary.
+padLen :: Word32 -> Int64
+padLen l = (fromIntegral l + 3) .&. (-4)
+
+instance Binary WlString where
+  get = do
+    len <- getWord32le
+    str <- getLazyByteString (fromIntegral len)
+    skip $ fromIntegral (padLen len - fromIntegral len)
+    return $ WlString str
+  put (WlString bs) = do
+    let str = bs <> "\0"
+    putWord32le (fromIntegral $ BSL.length str)
+    putLazyByteString str
+    let paddingBytes = padLen (fromIntegral $ BSL.length str) - BSL.length str
+    replicateM_ (fromIntegral paddingBytes) (putWord8 0)
 
 -- | Every interface that can appear as the object of a Wayland event.
 data WaylandInterface
@@ -56,48 +89,65 @@ data WaylandInterface
 
 type role ObjectID phantom
 
-newtype ObjectID (a :: WaylandInterface) = ObjectID {id :: WlID}
+newtype ObjectID (a :: WaylandInterface) = ObjectID {id :: WlUint}
   deriving newtype (PrintfArg, Num, Show)
+
+instance Binary (ObjectID a) where
+  get = ObjectID <$> get
+  put (ObjectID x) = put x
 
 type role WlArray representational
 
 newtype WlArray a = WlArray [a]
   deriving stock (Show)
 
-type role LittleEndian representational
-
-newtype LittleEndian a = LittleEndian a
+-- | Little-endian length-prefixed array of Word32.
+instance Binary (WlArray Word32) where
+  get = do
+    len <- getWord32le
+    bytes <- getLazyByteString $ padLen len
+    let elems = runGet (replicateM (fromIntegral len `div` 4) getWord32le) bytes
+    return $ WlArray elems
+  put (WlArray xs) = do
+    let len = fromIntegral (Relude.length xs * 4) :: Word32
+    putWord32le len
+    mapM_ putWord32le xs
 
 -- | Type representing Wayland color formats.
 data WlColorFormat
   = Argb8888
   | Xrgb8888
   | UnknownColorFormat WlUint
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord)
+
+instance Show WlColorFormat where
+  show Argb8888 = "argb8888"
+  show Xrgb8888 = "xrgb8888"
+  show (UnknownColorFormat n) = "Unknown color format " <> show n
 
 instance Binary WlColorFormat where
   put :: WlColorFormat -> Put
   put =
-    putWord32le . \case
-      Argb8888 -> 0
+    put . \case
+      Argb8888 -> 0 :: WlUint
       Xrgb8888 -> 1
-      UnknownColorFormat uint -> uint
+      UnknownColorFormat u -> u
 
   get :: Get WlColorFormat
   get =
-    getWord32le >>= \case
-      0 -> pure Argb8888
+    get >>= \case
+      (0 :: WlUint) -> pure Argb8888
       1 -> pure Xrgb8888
       n -> pure $ UnknownColorFormat n
 
 $( declareEvents
      --
-     [ event "WlDisplay" 0 "error" [("errorObjectID", ty ''WlID), ("errorCode", ty ''WlUint), ("errorMessage", ty ''WlString)]
-     , event "WlDisplay" 1 "deleteID" [("deletedID", ty ''WlID)]
+     [ event "WlDisplay" 0 "error" [("errorObjectID", ty ''WlUint), ("errorCode", ty ''WlUint), ("errorMessage", ty ''WlString)]
+     , event "WlDisplay" 1 "deleteID" [("deletedID", ty ''WlUint)]
      , --
        event "WlRegistry" 0 "global" [("name", ty ''WlUint), ("interface", ty ''WlString), ("version", ty ''WlUint)]
      , --
-       event "WlShm" 0 "format" [("format", ty ''Word32)]
+       event "WlShm" 0 "format" [("format", ty ''WlUint)]
      , --
        event "ZwlrLayerSurfaceV1" 0 "configure" [("serial", ty ''WlUint), ("width", ty ''WlUint), ("height", ty ''WlUint)]
      , --
@@ -108,8 +158,8 @@ $( declareEvents
        event "ExtWorkspaceHandleV1" 0 "id" [("id", ty ''WlString)]
      , event "ExtWorkspaceHandleV1" 1 "name" [("name", ty ''WlString)]
      , event "ExtWorkspaceHandleV1" 2 "coordinates" [("coordinates", appTy ''WlArray ''Word32)]
-     , event "ExtWorkspaceHandleV1" 3 "state" [("state", ty ''Word32)]
-     , event "ExtWorkspaceHandleV1" 4 "capabilities" [("capabilities", ty ''Word32)]
+     , event "ExtWorkspaceHandleV1" 3 "state" [("state", ty ''WlUint)]
+     , event "ExtWorkspaceHandleV1" 4 "capabilities" [("capabilities", ty ''WlUint)]
      , event "ExtWorkspaceHandleV1" 5 "removed" []
      , --
        event "ExtWorkspaceGroupHandleV1" 0 "capabilities" [("capabilities", ty ''WlUint)]
@@ -173,11 +223,11 @@ data Header = Header
 instance Binary Header where
   put :: Header -> Put
   put header = do
-    putWord32le header.objectID
+    put header.objectID
     putWord16le header.opCode
     putWord16le header.size
   get :: Get Header
-  get = Header <$> getWord32le <*> getWord16le <*> getWord16le
+  get = Header <$> get <*> getWord16le <*> getWord16le
 
 instance ToString Header where
   toString :: Header -> String
@@ -194,9 +244,9 @@ wlDisplay_getRegistry = do
   -- The object here is actually saved before the request is sent
   -- This is because the registry id is needed for parsing its requests/events
   modifyIORef env.objects (Map.insert registryID WlRegistry)
-  let messageBody = runPut $ putWord32le registryID
+  let messageBody = runPut $ put registryID
   liftIO . sendAll env.socket $ mkMessage wlDisplayID 1 messageBody
-  liftIO . strReq ("wl_display", wlDisplayID, "get_registry") $ printf "wl_registry=%i" registryID
+  liftIO . strReq ("wl_display", wlDisplayID, "get_registry") $ "wl_registry=" <> show registryID
   return $ coerce registryID
 
 wlShm_createPool :: ObjectID 'WlShm -> Fd -> WlInt -> Wayland (ObjectID 'WlShmPool)
@@ -204,13 +254,13 @@ wlShm_createPool wlShmID fileDescriptor poolSize = do
   env <- ask
   newObjectID <- nextID env.counter
   let messageBody = runPut $ do
-        putWord32le newObjectID
-        putInt32le poolSize
+        put newObjectID
+        put poolSize
   let msg = BS.toStrict $ mkMessage wlShmID 0 messageBody
   liftIO $ sendManyWithFds env.socket [msg] [fileDescriptor]
 
   let sender = ("wl_shm", wlShmID, "create_pool")
-  liftIO . strReq sender $ printf "newID=%i fd=%s size=%i" newObjectID (show @Text fileDescriptor) poolSize
+  liftIO . strReq sender $ mconcat ["newID=", show newObjectID, " fd=", show fileDescriptor, " size=", show poolSize]
   modifyIORef env.objects (Map.insert newObjectID WlShmPool)
   return $ coerce newObjectID
 
@@ -218,10 +268,10 @@ wlSurface_attach :: ObjectID 'WlSurface -> ObjectID 'WlBuffer -> Wayland ()
 wlSurface_attach wlSurfaceID wlBufferID = do
   env <- ask
   let messageBody = runPut $ do
-        putWord32le $ coerce wlBufferID
+        put wlBufferID
         -- x y arguments have to be set to 0
-        putInt32le 0
-        putInt32le 0
+        put (0 :: WlInt)
+        put (0 :: WlInt)
   liftIO . sendAll env.socket $ mkMessage wlSurfaceID 1 messageBody
   pure ()
 
@@ -229,8 +279,8 @@ wlSurface_damageBuffer :: ObjectID 'WlSurface -> WlInt -> WlInt -> WlInt -> WlIn
 wlSurface_damageBuffer wlSurfaceID x y width height = do
   env <- ask
   let messageBody = runPut $ do
-        putInt32le x
-        putInt32le y
+        put x
+        put y
         putWord32le $ fromIntegral width
         putWord32le $ fromIntegral height
   liftIO . sendAll env.socket $ mkMessage wlSurfaceID 9 messageBody
@@ -243,22 +293,22 @@ wlSurface_commit wlSurfaceID = do
   liftIO . sendAll env.socket $ mkMessage wlSurfaceID 6 messageBody
   pure ()
 
-zwlrLayerShellV1_getLayerSurface :: ObjectID 'ZwlrLayerShellV1 -> ObjectID 'WlSurface -> Word32 -> BSL.ByteString -> Wayland (ObjectID 'ZwlrLayerSurfaceV1)
+zwlrLayerShellV1_getLayerSurface :: ObjectID 'ZwlrLayerShellV1 -> ObjectID 'WlSurface -> Word32 -> WlString -> Wayland (ObjectID 'ZwlrLayerSurfaceV1)
 zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID layer namespace = do
   env <- ask
   newObjectID <- nextID env.counter
   let messageBody = runPut $ do
-        putWord32le newObjectID
-        putWord32le $ coerce wlSurfaceID
+        put newObjectID
+        put wlSurfaceID
         putWord32le waylandNull
         putWord32le layer
-        putWlString namespace
+        put namespace
   liftIO . sendAll env.socket $ mkMessage zwlrLayerShellV1ID 0 messageBody
 
   let sender = ("zwlr_layer_shell_v1", zwlrLayerShellV1ID, "get_layer_surface")
   liftIO
     . strReq sender
-    $ printf "newID=%i wl_surface=%i output=%i layer=%i namespace=%s" newObjectID wlSurfaceID waylandNull layer (BSL.unpackChars namespace)
+    $ printf "newID=%i wl_surface=%i output=%i layer=%i namespace=%s" newObjectID wlSurfaceID waylandNull layer (show namespace)
 
   modifyIORef env.objects (Map.insert newObjectID ZwlrLayerSurfaceV1)
   return $ coerce newObjectID
@@ -266,7 +316,7 @@ zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID layer namespace 
 zwlrLayerSurfaceV1_setAnchor :: ObjectID 'ZwlrLayerSurfaceV1 -> WlUint -> Wayland ()
 zwlrLayerSurfaceV1_setAnchor zwlrLayerSurfaceV1ID anchor = do
   env <- ask
-  let messageBody = runPut $ putWord32le anchor
+  let messageBody = runPut $ put anchor
   liftIO $ sendAll env.socket $ mkMessage zwlrLayerSurfaceV1ID 1 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "set_anchor")
   liftIO . strReq sender $ "anchor=" <> show anchor
@@ -275,8 +325,8 @@ zwlrLayerSurfaceV1_setSize :: ObjectID 'ZwlrLayerSurfaceV1 -> WlUint -> WlUint -
 zwlrLayerSurfaceV1_setSize zwlrLayerSurfaceV1ID width height = do
   env <- ask
   let messageBody = runPut $ do
-        putWord32le width
-        putWord32le height
+        put width
+        put height
   liftIO . sendAll env.socket $ mkMessage zwlrLayerSurfaceV1ID 0 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "set_size")
   liftIO . strReq sender $ "width=" <> show width <> "height=" <> show height
@@ -285,7 +335,7 @@ zwlrLayerSurfaceV1_ackConfigure :: ObjectID 'ZwlrLayerSurfaceV1 -> Wayland ()
 zwlrLayerSurfaceV1_ackConfigure zwlrLayerSurfaceV1ID = do
   env <- ask
   serial <- atomically $ takeTMVar env.serial
-  let messageBody = runPut $ do putWord32le serial
+  let messageBody = runPut $ put serial
   liftIO . sendAll env.socket $ mkMessage zwlrLayerSurfaceV1ID 6 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "ack_configure")
   liftIO . strReq sender $ "serial=" <> show serial
@@ -293,21 +343,21 @@ zwlrLayerSurfaceV1_ackConfigure zwlrLayerSurfaceV1ID = do
 zwlrLayerSurfaceV1_setExclusiveZone :: ObjectID 'ZwlrLayerSurfaceV1 -> WlInt -> Wayland ()
 zwlrLayerSurfaceV1_setExclusiveZone zwlrLayerSurfaceV1ID zone = do
   env <- ask
-  let messageBody = runPut $ do putInt32le zone
+  let messageBody = runPut $ put zone
   liftIO $ sendAll env.socket $ mkMessage zwlrLayerSurfaceV1ID 2 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "set_exclusive_zone")
-  liftIO . strReq sender $ printf "zone=%i" zone
+  liftIO . strReq sender $ "zone=" <> show zone
 
 wlShmPool_createBuffer :: ObjectID 'WlShmPool -> WlInt -> WlInt -> WlInt -> WlInt -> WlColorFormat -> Wayland Buffer
 wlShmPool_createBuffer wlShmPoolID offset bufferWidth bufferHeight colorChannels colorFormat = do
   env <- ask
   newObjectID <- nextID env.counter
   let messageBody = runPut $ do
-        putWord32le newObjectID
-        putInt32le offset
-        putInt32le bufferWidth
-        putInt32le bufferHeight
-        putInt32le $ bufferWidth * colorChannels -- Stride
+        put newObjectID
+        put offset
+        put bufferWidth
+        put bufferHeight
+        put (bufferWidth * colorChannels) -- Stride
         put colorFormat
   liftIO . sendAll env.socket $ mkMessage wlShmPoolID 0 messageBody
   let sender = ("wl_shm_pool", wlShmPoolID, "create_buffer")
@@ -319,10 +369,10 @@ wlRegistry_bind :: ObjectID 'WlRegistry -> WaylandInterface -> WlUint -> WlStrin
 wlRegistry_bind registryID waylandInterface globalName interfaceName interfaceVersion newObjectID = do
   env <- ask
   let messageBody = runPut $ do
-        putWord32le globalName
-        putWlString interfaceName
-        putWord32le interfaceVersion
-        putWord32le newObjectID
+        put globalName
+        put interfaceName
+        put interfaceVersion
+        put newObjectID
   liftIO $ sendAll env.socket $ mkMessage registryID 0 messageBody
   let sender = ("wl_registry", registryID, "bind")
   liftIO
@@ -331,7 +381,7 @@ wlRegistry_bind registryID waylandInterface globalName interfaceName interfaceVe
       [ "name="
       , show globalName
       , " interface="
-      , BSL.unpackChars interfaceName
+      , show interfaceName
       , " version="
       , show interfaceVersion
       , "id="
@@ -345,7 +395,7 @@ wlCompositor_createSurface :: ObjectID 'WlCompositor -> Wayland (ObjectID 'WlSur
 wlCompositor_createSurface wlCompositorID = do
   env <- ask
   newObjectID <- nextID env.counter
-  let messageBody = runPut $ putWord32le newObjectID
+  let messageBody = runPut $ put newObjectID
   liftIO $ sendAll env.socket $ mkMessage wlCompositorID 0 messageBody
   let sender = ("wl_compositor", wlCompositorID, "create_surface")
   liftIO . strReq sender $ printf "newID=%i" newObjectID
@@ -359,16 +409,16 @@ wlCompositor_createSurface wlCompositorID = do
 -- | Format a received event as a pretty string.
 formatEvent :: WaylandEvent -> String
 formatEvent = \case
-  EvWlDisplay_error h e -> fmt "wl_display" h $ "error: object_id=" <> show e.errorObjectID <> " code=" <> show e.errorCode <> " message=" <> BSL.unpackChars e.errorMessage
+  EvWlDisplay_error h e -> fmt "wl_display" h $ "error: object_id=" <> show e.errorObjectID <> " code=" <> show e.errorCode <> " message=" <> show e.errorMessage
   EvWlDisplay_deleteID h e -> fmt "wl_display" h $ "delete_id: id=" <> show e.deletedID
-  EvWlRegistry_global h e -> fmt "wl_registry" h $ "global: name=" <> show e.name <> " interface=" <> BSL.unpackChars e.interface <> " version=" <> show e.version
-  EvWlShm_format h e -> fmt "wl_shm" h $ "format: format=" <> show e.format <> " (" <> show e.format <> ")"
+  EvWlRegistry_global h e -> fmt "wl_registry" h $ "global: name=" <> show e.name <> " interface=" <> show e.interface <> " version=" <> show e.version
+  EvWlShm_format h e -> fmt "wl_shm" h $ "format: format=" <> show e.format
   EvZwlrLayerSurfaceV1_configure h e -> fmt "zwlr_layer_surface_v1" h $ "configure: serial=" <> show e.serial <> " width=" <> show e.width <> " height=" <> show e.height
   EvExtWorkspaceManagerV1_workspace h e -> fmt "ext_workspace_manager_v1" h $ "workspace: handle=" <> show e.handleID
   EvExtWorkspaceManagerV1_workspaceGroup h e -> fmt "ext_workspace_manager_v1" h $ "workspace_group: handle=" <> show e.handleID
   EvExtWorkspaceManagerV1_done h _ -> fmt "ext_workspace_manager_v1" h "done: done sending workspace info"
-  EvExtWorkspaceHandleV1_id h e -> fmt "ext_workspace_handle_v1" h $ "id: id=" <> BSL.unpackChars e.id
-  EvExtWorkspaceHandleV1_name h e -> fmt "ext_workspace_handle_v1" h $ "name: name=" <> BSL.unpackChars e.name
+  EvExtWorkspaceHandleV1_id h e -> fmt "ext_workspace_handle_v1" h $ "id: id=" <> show e.id
+  EvExtWorkspaceHandleV1_name h e -> fmt "ext_workspace_handle_v1" h $ "name: name=" <> show e.name
   EvExtWorkspaceHandleV1_coordinates h e -> fmt "ext_workspace_handle_v1" h $ "coordinates: coordinates=" <> show e.coordinates
   EvExtWorkspaceHandleV1_state h e -> fmt "ext_workspace_handle_v1" h $ "state: state=" <> show e.state
   EvExtWorkspaceHandleV1_capabilities h e -> fmt "ext_workspace_handle_v1" h $ "capabilities: capabilities=" <> show e.capabilities
@@ -437,10 +487,10 @@ handleEventResponse ev = do
       atomically $ putTMVar serial body.serial
     (EvExtWorkspaceManagerV1_workspace _ body) -> do
       objects <- asks (.objects)
-      modifyIORef objects $ Map.insert (coerce body.handleID) ExtWorkspaceHandleV1 -- This is stupid
+      modifyIORef objects $ Map.insert (coerce body.handleID) ExtWorkspaceHandleV1
     (EvExtWorkspaceManagerV1_workspaceGroup _ body) -> do
       objects <- asks (.objects)
-      modifyIORef objects $ Map.insert (coerce body.handleID) ExtWorkspaceGroupHandleV1 -- This is stupid
+      modifyIORef objects $ Map.insert (coerce body.handleID) ExtWorkspaceGroupHandleV1
     _ -> return ()
 
   handlers <- liftIO . readIORef =<< asks (.eventHandlers)
@@ -453,65 +503,13 @@ Example:
 
 > onEvent $ \case
 >   EvExtWorkspaceHandleV1_name h e ->
->     liftIO $ modifyIORef myRef (Map.insert h.objectID (decodeUtf8 e.name))
+>     liftIO $ modifyIORef myRef (Map.insert h.objectID (decodeUtf8 (unWlString e.name)))
 >   _ -> pure ()
 -}
 onEvent :: (WaylandEvent -> Wayland ()) -> Wayland ()
 onEvent handler = do
   handlersRef <- asks (.eventHandlers)
   liftIO $ modifyIORef handlersRef (handler :)
-
--- }}}
-
--- Vibecoded generic little-endian Binary deriving {{{
-
-type GBinaryLE :: forall {k}. (k -> Type) -> Constraint
-class GBinaryLE f where
-  ggetLE :: Get (f a)
-  gputLE :: f a -> Put
-
-instance GBinaryLE U1 where
-  ggetLE = return U1
-  gputLE U1 = return ()
-
-instance (GBinaryLE a, GBinaryLE b) => GBinaryLE (a :*: b) where
-  ggetLE = (:*:) <$> ggetLE <*> ggetLE
-  gputLE (a :*: b) = gputLE a *> gputLE b
-
-instance (GBinaryLE a) => GBinaryLE (M1 i c a) where
-  ggetLE = M1 <$> ggetLE
-  gputLE (M1 x) = gputLE x
-
-instance GBinaryLE (K1 i Word32) where
-  ggetLE = K1 <$> getWord32le
-  gputLE (K1 x) = putWord32le x
-
-instance GBinaryLE (K1 i (ObjectID a)) where
-  ggetLE = K1 <$> coerce getWord32le
-  gputLE (K1 x) = putWord32le $ coerce x
-
-instance GBinaryLE (K1 i Int32) where
-  ggetLE = K1 <$> getInt32le
-  gputLE (K1 x) = putInt32le x
-
-instance GBinaryLE (K1 i WlString) where
-  ggetLE = K1 <$> getWlString
-  gputLE (K1 x) = putWlString x
-
-instance GBinaryLE (K1 i (WlArray Word32)) where
-  ggetLE = do
-    len <- getWord32le
-    bytes <- getLazyByteString $ padLen len
-    let elems = runGet (replicateM (fromIntegral len `div` 4) getWord32le) bytes
-    return $ K1 (WlArray elems)
-  gputLE (K1 (WlArray xs)) = do
-    let len = fromIntegral (Relude.length xs * 4) :: Word32
-    putWord32le len
-    mapM_ putWord32le xs
-
-instance (Generic a, GBinaryLE (Rep a)) => Binary (LittleEndian a) where
-  get = LittleEndian . to <$> ggetLE
-  put (LittleEndian x) = gputLE (from x)
 
 -- }}}
 
@@ -526,8 +524,8 @@ bindToInterface registryID globalsRef targetInterface waylandInterface =
   let go (count :: Int) = do
         when
           (count >= 10)
-          (putStrLn ("ERROR: the wayland global " <> BSL.unpackChars targetInterface <> " not found") >> exitFailure)
-        liftIO $ printf "Trying to bind to %s... (%i)\n" (BSL.unpackChars targetInterface) count
+          (putStrLn ("ERROR: the wayland global " <> show targetInterface <> " not found") >> exitFailure)
+        liftIO $ printf "Trying to bind to %s... (%i)\n" (show targetInterface) count
         env <- ask
         globals <- readIORef globalsRef
         case findInterface globals of
@@ -540,28 +538,7 @@ bindToInterface registryID globalsRef targetInterface waylandInterface =
     findInterface :: Globals -> Maybe BodyWlRegistry_global
     findInterface globals =
       let target = targetInterface <> "\0"
-       in find (\(_, e) -> target `BSL.isPrefixOf` e.interface) globals >>= Just . snd
-
--- | Utility function for encoding and decoding Wayland strings.
-padLen :: Word32 -> Int64
-padLen l = (.&.) (fromIntegral l + 3) (-4)
-
--- | Encode a Wayland string type.
-putWlString :: WlString -> Put
-putWlString bs = do
-  let str = bs <> "\0"
-  putWord32le (fromIntegral $ BSL.length str)
-  putLazyByteString str
-  let paddingBytes = padLen (fromIntegral $ BSL.length str) - BSL.length str
-  replicateM_ (fromIntegral paddingBytes) (putWord8 0)
-
--- | Decode a Wayland string type.
-getWlString :: Get WlString
-getWlString = do
-  len <- getWord32le
-  str <- getLazyByteString (fromIntegral len)
-  skip $ fromIntegral (padLen len - fromIntegral len)
-  return str
+       in find (\(_, e) -> target.unWlString `BSL.isPrefixOf` e.interface.unWlString) globals >>= Just . snd
 
 -- | The header size is always 8 in Wayland.
 headerSize :: Int64
@@ -598,7 +575,7 @@ The header is generated based on this, the size is derived automatically.
 mkMessage :: ObjectID a -> Word16 -> BSL.ByteString -> BSL.ByteString
 mkMessage objectID opCode messageBody =
   runPut $ do
-    putWord32le $ coerce objectID
+    put objectID
     putWord16le opCode
     putWord16le $ fromIntegral (headerSize + BSL.length messageBody)
     putLazyByteString messageBody
