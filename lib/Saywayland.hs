@@ -54,20 +54,20 @@ instance Show WlString where
   show = BSL.unpackChars . (.unWlString)
 
 -- | Round a byte length up to the nearest 4-byte boundary.
-padLen :: Word32 -> Int64
-padLen l = (fromIntegral l + 3) .&. (-4)
+roundLength :: Word32 -> Int64
+roundLength l = (fromIntegral l + 3) .&. (-4)
 
 instance Binary WlString where
   get = do
     len <- getWord32le
     str <- getLazyByteString (fromIntegral len)
-    skip $ fromIntegral (padLen len - fromIntegral len)
+    skip $ fromIntegral (roundLength len - fromIntegral len)
     return $ WlString str
   put (WlString bs) = do
     let str = bs <> "\0"
     putWord32le (fromIntegral $ BSL.length str)
     putLazyByteString str
-    let paddingBytes = padLen (fromIntegral $ BSL.length str) - BSL.length str
+    let paddingBytes = roundLength (fromIntegral $ BSL.length str) - BSL.length str
     replicateM_ (fromIntegral paddingBytes) (putWord8 0)
 
 -- | Every interface that can appear as the object of a Wayland event.
@@ -105,7 +105,7 @@ newtype WlArray a = WlArray [a]
 instance Binary (WlArray Word32) where
   get = do
     len <- getWord32le
-    bytes <- getLazyByteString $ padLen len
+    bytes <- getLazyByteString $ roundLength len
     let elems = runGet (replicateM (fromIntegral len `div` 4) getWord32le) bytes
     return $ WlArray elems
   put (WlArray xs) = do
