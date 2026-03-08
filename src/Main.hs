@@ -24,7 +24,7 @@ main = do
 
 waylandSetup :: IO WaylandEnv
 waylandSetup = do
-  sock <- wlDisplayConnect
+  sock <- connectToWlSocket
   counter <- newIORef 2 -- start from 2 because wl_display is always 1
   globals <- newIORef mempty
   objects <- newIORef mempty

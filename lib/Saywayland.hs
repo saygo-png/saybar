@@ -19,7 +19,7 @@ import GHC.Generics
 import Network.Socket (Family (AF_UNIX), SockAddr (SockAddrUnix), Socket, SocketType (Stream), connect, defaultProtocol, socket)
 import Network.Socket.ByteString (sendManyWithFds)
 import Network.Socket.ByteString.Lazy (recv, sendAll)
-import Relude hiding (ByteString, get)
+import Relude hiding (ByteString, get, put)
 import SaywaylandTH
 import System.Console.ANSI (Color (..), ColorIntensity (..), ConsoleLayer (..), SGR (..), hNowSupportsANSI, setSGRCode)
 import System.Environment (getEnv)
@@ -72,7 +72,23 @@ newtype LittleEndian a = LittleEndian a
 data WlColorFormat
   = Argb8888
   | Xrgb8888
-  deriving stock (Eq, Ord, Show, Enum, Bounded)
+  | UnknownColorFormat WlUint
+  deriving stock (Eq, Ord, Show)
+
+instance Binary WlColorFormat where
+  put :: WlColorFormat -> Put
+  put =
+    putWord32le . \case
+      Argb8888 -> 0
+      Xrgb8888 -> 1
+      UnknownColorFormat uint -> uint
+
+  get :: Get WlColorFormat
+  get =
+    getWord32le >>= \case
+      0 -> pure Argb8888
+      1 -> pure Xrgb8888
+      n -> pure $ UnknownColorFormat n
 
 $( declareEvents
      --
@@ -113,15 +129,22 @@ type Globals = Map WlUint (Header, BodyWlRegistry_global)
 -- | Type representing a Wayland serial code with some context.
 data Serial = Serial
   { serialCode :: WlUint
+  -- ^ The serial code itself
   , originInterface :: WaylandInterface
+  -- ^ The interface that the serial code originated from.
   , originID :: WlID
+  -- ^ The ID of object that the serial code originated from.
   }
 
 data WaylandEnv = WaylandEnv
   { socket :: Socket
+  -- ^ The connected UNIX socket.
   , counter :: IORef WlID
+  -- ^ Counter used for generating unique object IDs.
   , globals :: IORef Globals
+  -- ^ Map of received globals. Globals might be removed.
   , objects :: IORef (Map WlID WaylandInterface)
+  -- ^ Map of existing objects. Objects might be removed.
   , serial :: TMVar WlUint
   , freeBuffer :: MVar ()
   , eventHandlers :: IORef [WaylandEvent -> Wayland ()]
@@ -133,12 +156,16 @@ type Wayland = ReaderT WaylandEnv IO
 data Buffer = Buffer
   { id :: ObjectID 'WlBuffer
   , offset :: WlInt
+  -- ^ Memory offset of the buffer.
   }
 
 -- | Type representing a Wayland header.
 data Header = Header
   { objectID :: WlID
   , opCode :: Word16
+  {- ^ Operation codes in Wayland are 0 indexed, separate for events and requests.
+  They are numbered based on the order of appearance in the protocol.
+  -}
   , size :: Word16
   }
   deriving stock (Show)
@@ -281,7 +308,7 @@ wlShmPool_createBuffer wlShmPoolID offset bufferWidth bufferHeight colorChannels
         putInt32le bufferWidth
         putInt32le bufferHeight
         putInt32le $ bufferWidth * colorChannels -- Stride
-        putWord32le $ formatValue colorFormat
+        put colorFormat
   liftIO . sendAll env.socket $ mkMessage wlShmPoolID 0 messageBody
   let sender = ("wl_shm_pool", wlShmPoolID, "create_buffer")
   liftIO . strReq sender $ printf "newID=%i" newObjectID
@@ -335,7 +362,7 @@ formatEvent = \case
   EvWlDisplay_error h e -> fmt "wl_display" h $ "error: object_id=" <> show e.errorObjectID <> " code=" <> show e.errorCode <> " message=" <> BSL.unpackChars e.errorMessage
   EvWlDisplay_deleteID h e -> fmt "wl_display" h $ "delete_id: id=" <> show e.deletedID
   EvWlRegistry_global h e -> fmt "wl_registry" h $ "global: name=" <> show e.name <> " interface=" <> BSL.unpackChars e.interface <> " version=" <> show e.version
-  EvWlShm_format h e -> fmt "wl_shm" h $ "format: format=" <> formatName e.format <> " (" <> show e.format <> ")"
+  EvWlShm_format h e -> fmt "wl_shm" h $ "format: format=" <> show e.format <> " (" <> show e.format <> ")"
   EvZwlrLayerSurfaceV1_configure h e -> fmt "zwlr_layer_surface_v1" h $ "configure: serial=" <> show e.serial <> " width=" <> show e.width <> " height=" <> show e.height
   EvExtWorkspaceManagerV1_workspace h e -> fmt "ext_workspace_manager_v1" h $ "workspace: handle=" <> show e.handleID
   EvExtWorkspaceManagerV1_workspaceGroup h e -> fmt "ext_workspace_manager_v1" h $ "workspace_group: handle=" <> show e.handleID
@@ -357,14 +384,6 @@ formatEvent = \case
   where
     fmt :: String -> Header -> String -> String
     fmt interface h details = interface <> "@" <> show h.objectID <> "." <> details
-
-{- | Get the color format name based on the wayland value.
-| Non-exhaustive, formats not listed will be shown as "format_" and the number
--}
-formatName :: Word32 -> String
-formatName 0 = "ARGB8888"
-formatName 1 = "XRGB8888"
-formatName n = "format_" <> show n
 
 -- }}}
 
@@ -552,22 +571,9 @@ headerSize = 8
 waylandNull :: Word32
 waylandNull = 0
 
--- | The argb8888 format is 0.
-wlColorFormatArgb8888 :: WlInt
-wlColorFormatArgb8888 = 0
-
--- | The argb8888 format is 1.
-wlColorFormatXrgb8888 :: WlInt
-wlColorFormatXrgb8888 = 1
-
 -- | wlDisplay always has ID 1 in Wayland.
 wlDisplayID :: ObjectID 'WlDisplay
 wlDisplayID = 1
-
--- | Convert a format to its Wayland wire value.
-formatValue :: WlColorFormat -> Word32
-formatValue Argb8888 = 0
-formatValue Xrgb8888 = 1
 
 {- | Convenience function for formatting events.
 Events are colored in magenta following the wayland.app colorscheme.
