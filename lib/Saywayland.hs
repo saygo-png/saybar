@@ -263,7 +263,7 @@ wlDisplay_getRegistry = do
   -- This is because the registry id is needed for parsing its requests/events
   modifyIORef env.objects (Map.insert registryID WlRegistry)
   let messageBody = runPut $ put registryID
-  liftIO . sendAll env.socket $ mkMessage wlDisplayID 1 messageBody
+  sendMessage wlDisplayID 1 messageBody
   liftIO . strReq ("wl_display", wlDisplayID, "get_registry") $ "wl_registry=" <> show registryID
   return $ coerce registryID
 
@@ -286,47 +286,44 @@ wlShm_createPool wlShmID fileDescriptor poolSize = do
 -- | https://wayland.app/protocols/wayland#wl_surface:request:attach
 wlSurface_attach :: ObjectID 'WlSurface -> ObjectID 'WlBuffer -> Wayland ()
 wlSurface_attach wlSurfaceID wlBufferID = do
-  env <- ask
   let messageBody = runPut $ do
         put wlBufferID
         -- x y arguments have to be set to 0
         put (0 :: WlInt)
         put (0 :: WlInt)
-  liftIO . sendAll env.socket $ mkMessage wlSurfaceID 1 messageBody
+  sendMessage wlSurfaceID 1 messageBody
   pure ()
 
 -- | https://wayland.app/protocols/wayland#wl_surface:request:damage_buffer
 wlSurface_damageBuffer :: ObjectID 'WlSurface -> WlInt -> WlInt -> WlInt -> WlInt -> Wayland ()
 wlSurface_damageBuffer wlSurfaceID x y width height = do
-  env <- ask
   let messageBody = runPut $ do
         put x
         put y
-        putWord32le $ fromIntegral width
-        putWord32le $ fromIntegral height
-  liftIO . sendAll env.socket $ mkMessage wlSurfaceID 9 messageBody
+        put width
+        put height
+  sendMessage wlSurfaceID 9 messageBody
   pure ()
 
 -- | https://wayland.app/protocols/wayland#wl_surface:request:commit
 wlSurface_commit :: ObjectID 'WlSurface -> Wayland ()
 wlSurface_commit wlSurfaceID = do
-  env <- ask
   let messageBody = runPut mempty
-  liftIO . sendAll env.socket $ mkMessage wlSurfaceID 6 messageBody
+  sendMessage wlSurfaceID 6 messageBody
   pure ()
 
 -- | https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_shell_v1:request:get_layer_surface
-zwlrLayerShellV1_getLayerSurface :: ObjectID 'ZwlrLayerShellV1 -> ObjectID 'WlSurface -> Word32 -> WlString -> Wayland (ObjectID 'ZwlrLayerSurfaceV1)
+zwlrLayerShellV1_getLayerSurface :: ObjectID 'ZwlrLayerShellV1 -> ObjectID 'WlSurface -> WlUint -> WlString -> Wayland (ObjectID 'ZwlrLayerSurfaceV1)
 zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID layer namespace = do
   env <- ask
   newObjectID <- nextID env.counter
   let messageBody = runPut $ do
         put newObjectID
         put wlSurfaceID
-        putWord32le waylandNull
-        putWord32le layer
+        put waylandNull
+        put layer
         put namespace
-  liftIO . sendAll env.socket $ mkMessage zwlrLayerShellV1ID 0 messageBody
+  sendMessage zwlrLayerShellV1ID 0 messageBody
 
   let sender = ("zwlr_layer_shell_v1", zwlrLayerShellV1ID, "get_layer_surface")
   liftIO
@@ -339,39 +336,35 @@ zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID layer namespace 
 -- | https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_surface_v1:request:set_anchor
 zwlrLayerSurfaceV1_setAnchor :: ObjectID 'ZwlrLayerSurfaceV1 -> WlUint -> Wayland ()
 zwlrLayerSurfaceV1_setAnchor zwlrLayerSurfaceV1ID anchor = do
-  env <- ask
   let messageBody = runPut $ put anchor
-  liftIO $ sendAll env.socket $ mkMessage zwlrLayerSurfaceV1ID 1 messageBody
+  sendMessage zwlrLayerSurfaceV1ID 1 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "set_anchor")
   liftIO . strReq sender $ "anchor=" <> show anchor
 
 -- | https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_surface_v1:request:set_size
 zwlrLayerSurfaceV1_setSize :: ObjectID 'ZwlrLayerSurfaceV1 -> WlUint -> WlUint -> Wayland ()
 zwlrLayerSurfaceV1_setSize zwlrLayerSurfaceV1ID width height = do
-  env <- ask
   let messageBody = runPut $ do
         put width
         put height
-  liftIO . sendAll env.socket $ mkMessage zwlrLayerSurfaceV1ID 0 messageBody
+  sendMessage zwlrLayerSurfaceV1ID 0 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "set_size")
   liftIO . strReq sender $ "width=" <> show width <> "height=" <> show height
 
 -- | https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_surface_v1:request:ack_configure
 zwlrLayerSurfaceV1_ackConfigure :: ObjectID 'ZwlrLayerSurfaceV1 -> Wayland ()
 zwlrLayerSurfaceV1_ackConfigure zwlrLayerSurfaceV1ID = do
-  env <- ask
-  serial <- atomically $ takeTMVar env.serial
+  serial <- atomically . takeTMVar =<< asks (.serial)
   let messageBody = runPut $ put serial
-  liftIO . sendAll env.socket $ mkMessage zwlrLayerSurfaceV1ID 6 messageBody
+  sendMessage zwlrLayerSurfaceV1ID 6 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "ack_configure")
   liftIO . strReq sender $ "serial=" <> show serial
 
 -- | https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_surface_v1:request:set_exclusive_zone
 zwlrLayerSurfaceV1_setExclusiveZone :: ObjectID 'ZwlrLayerSurfaceV1 -> WlInt -> Wayland ()
 zwlrLayerSurfaceV1_setExclusiveZone zwlrLayerSurfaceV1ID zone = do
-  env <- ask
   let messageBody = runPut $ put zone
-  liftIO $ sendAll env.socket $ mkMessage zwlrLayerSurfaceV1ID 2 messageBody
+  sendMessage zwlrLayerSurfaceV1ID 2 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "set_exclusive_zone")
   liftIO . strReq sender $ "zone=" <> show zone
 
@@ -387,7 +380,7 @@ wlShmPool_createBuffer wlShmPoolID offset bufferWidth bufferHeight colorChannels
         put bufferHeight
         put (bufferWidth * colorChannels) -- Stride
         put colorFormat
-  liftIO . sendAll env.socket $ mkMessage wlShmPoolID 0 messageBody
+  sendMessage wlShmPoolID 0 messageBody
   let sender = ("wl_shm_pool", wlShmPoolID, "create_buffer")
   liftIO . strReq sender $ printf "newID=%i" newObjectID
   modifyIORef env.objects (Map.insert newObjectID WlBuffer)
@@ -402,7 +395,7 @@ wlRegistry_bind registryID waylandInterface globalName interfaceName interfaceVe
         put interfaceName
         put interfaceVersion
         put newObjectID
-  liftIO $ sendAll env.socket $ mkMessage registryID 0 messageBody
+  sendMessage registryID 0 messageBody
   let sender = ("wl_registry", registryID, "bind")
   liftIO
     . strReq sender
@@ -426,7 +419,7 @@ wlCompositor_createSurface wlCompositorID = do
   env <- ask
   newObjectID <- nextID env.counter
   let messageBody = runPut $ put newObjectID
-  liftIO $ sendAll env.socket $ mkMessage wlCompositorID 0 messageBody
+  sendMessage wlCompositorID 0 messageBody
   let sender = ("wl_compositor", wlCompositorID, "create_surface")
   liftIO . strReq sender $ printf "newID=%i" newObjectID
   modifyIORef env.objects (Map.insert newObjectID WlSurface)
@@ -571,14 +564,14 @@ bindToInterface registryID globalsRef targetInterface waylandInterface =
        in find (\(_, e) -> target.unWlString `BSL.isPrefixOf` e.interface.unWlString) globals >>= Just . snd
 
 -- | The header size is always 8 in Wayland.
-headerSize :: Int64
+headerSize :: Word16
 headerSize = 8
 
--- | Wayland null is just 0.
-waylandNull :: Word32
+-- | Constant representing the Wayland null, which is just 0.
+waylandNull :: WlUint
 waylandNull = 0
 
--- | wlDisplay always has ID 1 in Wayland.
+-- | Constant representing the wl_display ID which is always 1 in Wayland.
 wlDisplayID :: ObjectID 'WlDisplay
 wlDisplayID = 1
 
@@ -611,10 +604,16 @@ The header is generated based on this, the size is derived automatically.
 mkMessage :: ObjectID a -> Word16 -> BSL.ByteString -> BSL.ByteString
 mkMessage objectID opCode messageBody =
   runPut $ do
-    put objectID
-    putWord16le opCode
-    putWord16le $ fromIntegral (headerSize + BSL.length messageBody)
+    put $ Header objectID.id opCode (headerSize + fromIntegral (BSL.length messageBody))
     putLazyByteString messageBody
+
+{- | Convenience function for sending a Wayland message.
+See 'mkMessage'.
+-}
+sendMessage :: ObjectID a -> Word16 -> BSL.ByteString -> Wayland ()
+sendMessage objectID opCode messageBody = do
+  wlSocket <- asks (.socket)
+  liftIO . sendAll wlSocket $ mkMessage objectID opCode messageBody
 
 {- | Connect to the Wayland socket.
 The socket path is $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY
