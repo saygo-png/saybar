@@ -1,9 +1,18 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 {- HLINT ignore "Use camelCase" -}
 
-module Saywayland (module Saywayland) where
+{- |
+Module      : Saywayland
+Description : Module containing all of Saywayland except the template haskell.
+
+The module contains events and requests which directly represent wayland ones.
+Look for the documentation in Wayland docs, for example in <https://wayland.app/protocols/>.
+The naming scheme for them is \<interface\>_\<method\>
+-}
+module Saywayland where
 
 import Control.Concurrent (threadDelay)
 import Data.Binary
@@ -14,7 +23,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
 import Data.ByteString.Lazy.Internal qualified as BSL
 import Data.Map qualified as Map
-import GHC.Show (Show (show))
+import GHC.Show (show)
 import Network.Socket (Family (AF_UNIX), SockAddr (SockAddrUnix), Socket, SocketType (Stream), connect, defaultProtocol, socket)
 import Network.Socket.ByteString (sendManyWithFds)
 import Network.Socket.ByteString.Lazy (recv, sendAll)
@@ -29,7 +38,7 @@ import Text.Printf (PrintfArg, printf)
 
 -- | Wayland Uint
 newtype WlUint = WlUint {unWlUint :: Word32}
-  deriving newtype (Eq, Ord, Num, Integral, Real, Enum, PrintfArg, Show)
+  deriving newtype (Eq, Ord, Num, Integral, Bits, Real, Enum, PrintfArg, Show)
 
 instance Binary WlUint where
   get = WlUint <$> getWord32le
@@ -40,7 +49,7 @@ type WlID = WlUint
 
 -- | Wayland Int.
 newtype WlInt = WlInt {unWlInt :: Int32}
-  deriving newtype (Eq, Ord, Num, Integral, Real, Enum, Show)
+  deriving newtype (Eq, Ord, Num, Integral, Bits, Real, Enum, Show)
 
 instance Binary WlInt where
   get = WlInt <$> getInt32le
@@ -89,6 +98,7 @@ data WaylandInterface
 
 type role ObjectID phantom
 
+-- | Phantom type representing an ID of an object.
 newtype ObjectID (a :: WaylandInterface) = ObjectID {id :: WlUint}
   deriving newtype (PrintfArg, Num, Show)
 
@@ -98,6 +108,7 @@ instance Binary (ObjectID a) where
 
 type role WlArray representational
 
+-- | Wayland array type.
 newtype WlArray a = WlArray [a]
   deriving stock (Show)
 
@@ -186,6 +197,10 @@ data Serial = Serial
   -- ^ The ID of object that the serial code originated from.
   }
 
+{- | Record containing the essential state needed for Wayland.
+The state contained is only essential, the user is expected to make their own structures
+to store state required for their specific application. This can be done using event handlers made with 'onEvent'.
+-}
 data WaylandEnv = WaylandEnv
   { socket :: Socket
   -- ^ The connected UNIX socket.
@@ -200,6 +215,7 @@ data WaylandEnv = WaylandEnv
   , eventHandlers :: IORef [WaylandEvent -> Wayland ()]
   }
 
+-- | The Wayland monad. Allows easy access to the Wayland environment state without threading repetitive arguments.
 type Wayland = ReaderT WaylandEnv IO
 
 -- | Type representing a Wayland buffer.
@@ -237,6 +253,8 @@ instance ToString Header where
 -- }}}
 
 -- Requests {{{
+
+-- | https://wayland.app/protocols/wayland#wl_display:request:get_registry
 wlDisplay_getRegistry :: Wayland (ObjectID 'WlRegistry)
 wlDisplay_getRegistry = do
   env <- ask
@@ -249,6 +267,7 @@ wlDisplay_getRegistry = do
   liftIO . strReq ("wl_display", wlDisplayID, "get_registry") $ "wl_registry=" <> show registryID
   return $ coerce registryID
 
+-- | https://wayland.app/protocols/wayland#wl_shm:request:create_pool
 wlShm_createPool :: ObjectID 'WlShm -> Fd -> WlInt -> Wayland (ObjectID 'WlShmPool)
 wlShm_createPool wlShmID fileDescriptor poolSize = do
   env <- ask
@@ -264,6 +283,7 @@ wlShm_createPool wlShmID fileDescriptor poolSize = do
   modifyIORef env.objects (Map.insert newObjectID WlShmPool)
   return $ coerce newObjectID
 
+-- | https://wayland.app/protocols/wayland#wl_surface:request:attach
 wlSurface_attach :: ObjectID 'WlSurface -> ObjectID 'WlBuffer -> Wayland ()
 wlSurface_attach wlSurfaceID wlBufferID = do
   env <- ask
@@ -275,6 +295,7 @@ wlSurface_attach wlSurfaceID wlBufferID = do
   liftIO . sendAll env.socket $ mkMessage wlSurfaceID 1 messageBody
   pure ()
 
+-- | https://wayland.app/protocols/wayland#wl_surface:request:damage_buffer
 wlSurface_damageBuffer :: ObjectID 'WlSurface -> WlInt -> WlInt -> WlInt -> WlInt -> Wayland ()
 wlSurface_damageBuffer wlSurfaceID x y width height = do
   env <- ask
@@ -286,6 +307,7 @@ wlSurface_damageBuffer wlSurfaceID x y width height = do
   liftIO . sendAll env.socket $ mkMessage wlSurfaceID 9 messageBody
   pure ()
 
+-- | https://wayland.app/protocols/wayland#wl_surface:request:commit
 wlSurface_commit :: ObjectID 'WlSurface -> Wayland ()
 wlSurface_commit wlSurfaceID = do
   env <- ask
@@ -293,6 +315,7 @@ wlSurface_commit wlSurfaceID = do
   liftIO . sendAll env.socket $ mkMessage wlSurfaceID 6 messageBody
   pure ()
 
+-- | https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_shell_v1:request:get_layer_surface
 zwlrLayerShellV1_getLayerSurface :: ObjectID 'ZwlrLayerShellV1 -> ObjectID 'WlSurface -> Word32 -> WlString -> Wayland (ObjectID 'ZwlrLayerSurfaceV1)
 zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID layer namespace = do
   env <- ask
@@ -313,6 +336,7 @@ zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID layer namespace 
   modifyIORef env.objects (Map.insert newObjectID ZwlrLayerSurfaceV1)
   return $ coerce newObjectID
 
+-- | https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_surface_v1:request:set_anchor
 zwlrLayerSurfaceV1_setAnchor :: ObjectID 'ZwlrLayerSurfaceV1 -> WlUint -> Wayland ()
 zwlrLayerSurfaceV1_setAnchor zwlrLayerSurfaceV1ID anchor = do
   env <- ask
@@ -321,6 +345,7 @@ zwlrLayerSurfaceV1_setAnchor zwlrLayerSurfaceV1ID anchor = do
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "set_anchor")
   liftIO . strReq sender $ "anchor=" <> show anchor
 
+-- | https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_surface_v1:request:set_size
 zwlrLayerSurfaceV1_setSize :: ObjectID 'ZwlrLayerSurfaceV1 -> WlUint -> WlUint -> Wayland ()
 zwlrLayerSurfaceV1_setSize zwlrLayerSurfaceV1ID width height = do
   env <- ask
@@ -331,6 +356,7 @@ zwlrLayerSurfaceV1_setSize zwlrLayerSurfaceV1ID width height = do
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "set_size")
   liftIO . strReq sender $ "width=" <> show width <> "height=" <> show height
 
+-- | https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_surface_v1:request:ack_configure
 zwlrLayerSurfaceV1_ackConfigure :: ObjectID 'ZwlrLayerSurfaceV1 -> Wayland ()
 zwlrLayerSurfaceV1_ackConfigure zwlrLayerSurfaceV1ID = do
   env <- ask
@@ -340,6 +366,7 @@ zwlrLayerSurfaceV1_ackConfigure zwlrLayerSurfaceV1ID = do
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "ack_configure")
   liftIO . strReq sender $ "serial=" <> show serial
 
+-- | https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_surface_v1:request:set_exclusive_zone
 zwlrLayerSurfaceV1_setExclusiveZone :: ObjectID 'ZwlrLayerSurfaceV1 -> WlInt -> Wayland ()
 zwlrLayerSurfaceV1_setExclusiveZone zwlrLayerSurfaceV1ID zone = do
   env <- ask
@@ -348,6 +375,7 @@ zwlrLayerSurfaceV1_setExclusiveZone zwlrLayerSurfaceV1ID zone = do
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "set_exclusive_zone")
   liftIO . strReq sender $ "zone=" <> show zone
 
+-- | https://wayland.app/protocols/wayland#wl_shm_pool:request:create_buffer
 wlShmPool_createBuffer :: ObjectID 'WlShmPool -> WlInt -> WlInt -> WlInt -> WlInt -> WlColorFormat -> Wayland Buffer
 wlShmPool_createBuffer wlShmPoolID offset bufferWidth bufferHeight colorChannels colorFormat = do
   env <- ask
@@ -365,6 +393,7 @@ wlShmPool_createBuffer wlShmPoolID offset bufferWidth bufferHeight colorChannels
   modifyIORef env.objects (Map.insert newObjectID WlBuffer)
   return $ Buffer (coerce newObjectID) offset
 
+-- | https://wayland.app/protocols/wayland#wl_registry:request:bind
 wlRegistry_bind :: ObjectID 'WlRegistry -> WaylandInterface -> WlUint -> WlString -> WlUint -> WlID -> Wayland (ObjectID a)
 wlRegistry_bind registryID waylandInterface globalName interfaceName interfaceVersion newObjectID = do
   env <- ask
@@ -391,6 +420,7 @@ wlRegistry_bind registryID waylandInterface globalName interfaceName interfaceVe
   modifyIORef env.objects (Map.insert newObjectID waylandInterface)
   return $ coerce newObjectID
 
+-- | https://wayland.app/protocols/wayland#wl_compositor:request:create_surface
 wlCompositor_createSurface :: ObjectID 'WlCompositor -> Wayland (ObjectID 'WlSurface)
 wlCompositor_createSurface wlCompositorID = do
   env <- ask
@@ -551,6 +581,12 @@ waylandNull = 0
 -- | wlDisplay always has ID 1 in Wayland.
 wlDisplayID :: ObjectID 'WlDisplay
 wlDisplayID = 1
+
+{- | Convert a WlString to text while stripping null terminators.
+| Simply using 'show' does not strip null terminators.
+-}
+wlToText :: WlString -> Text
+wlToText = decodeUtf8 . BSL.toStrict . BSL.takeWhile (/= 0) . (.unWlString)
 
 {- | Convenience function for formatting events.
 Events are colored in magenta following the wayland.app colorscheme.

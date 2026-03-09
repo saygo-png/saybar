@@ -16,13 +16,14 @@ event "WlDisplay" 0 "error"
 @
 
 Each entry generates:
-  * A @Body\<Interface\>_\<name\>@ data type (with Generic, Show, and Binary via anyclass)
-  * An @Ev\<Interface\>_\<name\> Header Body…@ constructor in 'WaylandEvent'
-  * A @(Just \<Interface\>, opCode)@ case in @parseEvent@
 
-The @Binary@ instances are derived via @anyclass@ and rely on each field type
-having a correct little-endian @Binary@ instance — see 'WlUint', 'WlInt',
-'WlString', 'ObjectID', and 'WlArray' in "Saywayland".
+  * @Body\<Interface\>_\<name\>@ data type with Show and Binary instances
+  * @Ev\<Interface\>_\<name\> Header Body@ constructor in 'Saywayland.WaylandEvent'
+  * @(Just \<Interface\>, opCode)@ case in @parseEvent@
+
+The @Binary@ instances rely on each field type
+having a correct little-endian @Binary@ instance — see 'Saywayland.WlUint', 'Saywayland.WlInt',
+'Saywayland.WlString', 'Saywayland.ObjectID' and 'Saywayland.WlArray' in "Saywayland".
 -}
 module SaywaylandTH (
   EventSpec,
@@ -32,7 +33,10 @@ module SaywaylandTH (
   declareEvents,
 ) where
 
+import Data.Char (isUpper, toLower)
+import Data.Foldable
 import Language.Haskell.TH
+import Language.Haskell.TH.Syntax (addModFinalizer)
 import Relude hiding (Type)
 
 -- ---------------------------------------------------------------------------
@@ -97,6 +101,13 @@ bodyTypeName es = mkName $ "Body" ++ es.interface ++ "_" ++ es.name
 evConName :: EventSpec -> Name
 evConName es = mkName $ "Ev" ++ es.interface ++ "_" ++ es.name
 
+toSnakeCase :: String -> String
+toSnakeCase [] = []
+toSnakeCase (c : cs) = toLower c : concatMap (\x -> if isUpper x then ['_', toLower x] else [x]) cs
+
+addDoc :: Name -> [String] -> Q ()
+addDoc name = void . addModFinalizer . putDoc (DeclDoc name) . mconcat
+
 -- ---------------------------------------------------------------------------
 -- 1. Body data-type generation
 -- ---------------------------------------------------------------------------
@@ -108,7 +119,7 @@ One or more  → @data Body… = Body… { field :: Type, … }@
 
 Both variants derive @Generic@ and @Show@ via @stock@, and @Binary@ via
 @anyclass@. The @Binary@ instances are correct because every wire field type
-('WlUint', 'WlInt', 'WlString', 'ObjectID', 'WlArray') has its own
+('Saywayland.WlUint', 'Saywayland.WlInt', 'Saywayland.WlString', 'Saywayland.ObjectID', 'Saywayland.WlArray') has its own
 little-endian @Binary@ instance.
 -}
 mkBodyDecl :: EventSpec -> Q [Dec]
@@ -119,24 +130,45 @@ mkBodyDecl es = do
   -- Resolve the Q Type values for each field
   resolvedFields <- mapM (\(fn, qt) -> (fn,) <$> qt) es.fields
 
-  let con = case resolvedFields of
-        -- Empty constructor (no-payload events like "done", "removed")
+  let fieldNames = map fst resolvedFields
+
+      con = case resolvedFields of
         [] -> NormalC tyName []
-        -- Record constructor (one or more fields)
+        fs -> RecC tyName [(mkName fn, bang', t) | (fn, t) <- fs]
+
+      -- deriving stock (Show)
+      stockDeriv = DerivClause (Just StockStrategy) [ConT ''Show]
+
+      dataDec = DataD [] tyName [] Nothing [con] [stockDeriv]
+
+      -- get = Con <$> get <*> get <*> ...
+      getExpr = case fieldNames of
+        [] -> AppE (VarE (mkName "pure")) (ConE tyName)
+        _ ->
+          foldl
+            (\acc _ -> InfixE (Just acc) (VarE (mkName "<*>")) (Just (VarE (mkName "get"))))
+            (InfixE (Just (ConE tyName)) (VarE (mkName "<$>")) (Just (VarE (mkName "get"))))
+            (drop 1 fieldNames)
+
+      -- put x = put x.field1 >> put x.field2 >> ...
+      xV = mkName "_x"
+      putExpr = case fieldNames of
+        [] -> AppE (VarE (mkName "pure")) (TupE [])
         fs ->
-          RecC
-            tyName
-            [(mkName fn, bang', t) | (fn, t) <- fs]
+          foldr1
+            (\a b -> InfixE (Just a) (VarE (mkName ">>")) (Just b))
+            [AppE (VarE (mkName "put")) (GetFieldE (VarE xV) fn) | fn <- fs]
 
-      -- deriving stock (Generic, Show)
-      stockDeriv = DerivClause (Just StockStrategy) [ConT ''Generic, ConT ''Show]
+      binaryInst =
+        InstanceD
+          Nothing
+          []
+          (AppT (ConT (mkName "Binary")) (ConT tyName))
+          [ FunD (mkName "get") [Clause [] (NormalB getExpr) []]
+          , FunD (mkName "put") [Clause [VarP xV] (NormalB putExpr) []]
+          ]
 
-      -- deriving anyclass (Binary)
-      anyclassDeriv = DerivClause (Just AnyclassStrategy) [ConT (mkName "Binary")]
-
-      dataDec = DataD [] tyName [] Nothing [con] [stockDeriv, anyclassDeriv]
-
-  pure [dataDec]
+  pure [dataDec, binaryInst]
 
 -- ---------------------------------------------------------------------------
 -- 2. WaylandEvent sum-type generation
@@ -152,22 +184,30 @@ mkEventDecl specs = do
   let bang' = Bang NoSourceUnpackedness NoSourceStrictness
       headerT = ConT (mkName "Header")
 
-      mkCon es =
-        NormalC
-          (evConName es)
-          [ (bang', headerT)
-          , (bang', ConT (bodyTypeName es))
-          ]
+      mkCon es = do
+        let conName = evConName es
+            bodyName = bodyTypeName es
+        addDoc conName ["Event @", es.name, "@ on object @", toSnakeCase es.interface, "@"]
+        addDoc bodyName ["Represents the body (payload) of the @", es.name, "@ event on object @", toSnakeCase es.interface, "@."]
+        pure
+          $ NormalC
+            conName
+            [ (bang', headerT)
+            , (bang', ConT bodyName)
+            ]
 
       unknownCon = NormalC (mkName "EvUnknown") [(bang', headerT)]
 
+  addDoc (mkName "EvUnknown") ["Event is not known, this shouldn't happen"]
+  addDoc (mkName "WaylandEvent") ["Type representing a Wayland event. It contains a header and a body (also known as a payload)."]
+  cons <- mapM mkCon specs
   pure
     $ DataD
       []
       (mkName "WaylandEvent")
       []
       Nothing
-      (map mkCon specs ++ [unknownCon])
+      (cons ++ [unknownCon])
       []
 
 -- ---------------------------------------------------------------------------
@@ -260,11 +300,13 @@ mkParseDecl specs = do
               `AppT` (ConT (mkName "Map") `AppT` ConT (mkName "WlUint") `AppT` ConT (mkName "WaylandInterface"))
               `AppT` (ConT (mkName "Get") `AppT` ConT (mkName "WaylandEvent"))
           )
+  let name = mkName "parseEvent"
+  addDoc name ["Wayland event parser."]
 
   pure
     [ sig
     , FunD
-        (mkName "parseEvent")
+        name
         [ Clause
             [VarP objectsV]
             (NormalB (DoE Nothing doStmts))

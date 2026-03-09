@@ -89,6 +89,7 @@ executable saybar
     , typed-process
     , unix
     , vector
+    , stm
 
   ghc-options:    -rtsopts -with-rtsopts=-N
   hs-source-dirs: src
