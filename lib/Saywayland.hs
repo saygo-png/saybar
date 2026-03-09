@@ -23,22 +23,21 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
 import Data.ByteString.Lazy.Internal qualified as BSL
 import Data.Map qualified as Map
-import GHC.Show (show)
+import GHC.Show qualified as GHC
 import Network.Socket (Family (AF_UNIX), SockAddr (SockAddrUnix), Socket, SocketType (Stream), connect, defaultProtocol, socket)
 import Network.Socket.ByteString (sendManyWithFds)
 import Network.Socket.ByteString.Lazy (recv, sendAll)
-import Relude hiding (ByteString, get, put, show)
+import Relude hiding (ByteString, get, put)
 import SaywaylandTH
 import System.Console.ANSI (Color (..), ColorIntensity (..), ConsoleLayer (..), SGR (..), hNowSupportsANSI, setSGRCode)
 import System.Environment (getEnv)
 import System.Posix.Types (Fd)
-import Text.Printf (PrintfArg, printf)
 
 -- Types {{{
 
 -- | Wayland Uint
 newtype WlUint = WlUint {unWlUint :: Word32}
-  deriving newtype (Eq, Ord, Num, Integral, Bits, Real, Enum, PrintfArg, Show)
+  deriving newtype (Eq, Ord, Num, Integral, Bits, Real, Enum, Show)
 
 instance Binary WlUint where
   get = WlUint <$> getWord32le
@@ -100,7 +99,7 @@ type role ObjectID phantom
 
 -- | Phantom type representing an ID of an object.
 newtype ObjectID (a :: WaylandInterface) = ObjectID {id :: WlUint}
-  deriving newtype (PrintfArg, Num, Show)
+  deriving newtype (Num, Show)
 
 instance Binary (ObjectID a) where
   get = ObjectID <$> get
@@ -213,6 +212,7 @@ data WaylandEnv = WaylandEnv
   , serial :: TMVar WlUint
   , freeBuffer :: MVar ()
   , eventHandlers :: IORef [WaylandEvent -> Wayland ()]
+  -- ^ List of custom event handlers. Use 'onEvent' to add a custom handler.
   }
 
 -- | The Wayland monad. Allows easy access to the Wayland environment state without threading repetitive arguments.
@@ -245,10 +245,10 @@ instance Binary Header where
   get :: Get Header
   get = Header <$> get <*> getWord16le <*> getWord16le
 
-instance ToString Header where
-  toString :: Header -> String
-  toString (Header objectID opCode size) =
-    printf "-- wl_header: objectID=%i opCode=%i size=%i" objectID opCode size
+instance ToText Header where
+  toText :: Header -> Text
+  toText (Header objectID opCode size) =
+    mconcat ["-- wl_header: objectID=", show objectID, " opCode=", show opCode, " size=", show size]
 
 -- }}}
 
@@ -328,7 +328,18 @@ zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID layer namespace 
   let sender = ("zwlr_layer_shell_v1", zwlrLayerShellV1ID, "get_layer_surface")
   liftIO
     . strReq sender
-    $ printf "newID=%i wl_surface=%i output=%i layer=%i namespace=%s" newObjectID wlSurfaceID waylandNull layer (show namespace)
+    $ mconcat
+      [ "newID="
+      , show newObjectID
+      , " wl_surface="
+      , show wlSurfaceID
+      , " output="
+      , show waylandNull
+      , " layer="
+      , show layer
+      , " namespace="
+      , show namespace
+      ]
 
   modifyIORef env.objects (Map.insert newObjectID ZwlrLayerSurfaceV1)
   return $ coerce newObjectID
@@ -382,7 +393,7 @@ wlShmPool_createBuffer wlShmPoolID offset bufferWidth bufferHeight colorChannels
         put colorFormat
   sendMessage wlShmPoolID 0 messageBody
   let sender = ("wl_shm_pool", wlShmPoolID, "create_buffer")
-  liftIO . strReq sender $ printf "newID=%i" newObjectID
+  liftIO . strReq sender $ mconcat ["newID=", show newObjectID]
   modifyIORef env.objects (Map.insert newObjectID WlBuffer)
   return $ Buffer (coerce newObjectID) offset
 
@@ -421,7 +432,7 @@ wlCompositor_createSurface wlCompositorID = do
   let messageBody = runPut $ put newObjectID
   sendMessage wlCompositorID 0 messageBody
   let sender = ("wl_compositor", wlCompositorID, "create_surface")
-  liftIO . strReq sender $ printf "newID=%i" newObjectID
+  liftIO . strReq sender $ mconcat ["newID=", show newObjectID]
   modifyIORef env.objects (Map.insert newObjectID WlSurface)
   return $ coerce newObjectID
 
@@ -430,7 +441,7 @@ wlCompositor_createSurface wlCompositorID = do
 -- Event helpers {{{
 
 -- | Format a received event as a pretty string.
-formatEvent :: WaylandEvent -> String
+formatEvent :: WaylandEvent -> Text
 formatEvent = \case
   EvWlDisplay_error h e -> fmt "wl_display" h $ "error: object_id=" <> show e.errorObjectID <> " code=" <> show e.errorCode <> " message=" <> show e.errorMessage
   EvWlDisplay_deleteID h e -> fmt "wl_display" h $ "delete_id: id=" <> show e.deletedID
@@ -455,7 +466,7 @@ formatEvent = \case
   EvWlBuffer_release h _ -> fmt "wl_buffer" h "release: buffer released"
   EvUnknown h -> "UNKNOWN EVENT: objectID=" <> show h.objectID <> " opCode=" <> show h.opCode <> " size=" <> show h.size
   where
-    fmt :: String -> Header -> String -> String
+    fmt :: Text -> Header -> Text -> Text
     fmt interface h details = interface <> "@" <> show h.objectID <> "." <> details
 
 -- }}}
@@ -489,10 +500,10 @@ processBuffer bytes = do
     Partial _ ->
       return ()
     Fail _ _ err ->
-      liftIO $ putStrLn $ "Parse error: " <> err
+      liftIO $ putTextLn $ "Parse error: " <> toText err
   where
     displayEvent :: WaylandEvent -> IO ()
-    displayEvent ev = putStrLn $ "<- " <> formatEvent ev
+    displayEvent ev = putTextLn $ "<- " <> formatEvent ev
 
 {- | Event handler.
 Assigns objects, globals and performs other actions based on events.
@@ -547,8 +558,8 @@ bindToInterface registryID globalsRef targetInterface waylandInterface =
   let go (count :: Int) = do
         when
           (count >= 10)
-          (putStrLn ("ERROR: the wayland global " <> show targetInterface <> " not found") >> exitFailure)
-        liftIO $ printf "Trying to bind to %s... (%i)\n" (show targetInterface) count
+          (putTextLn ("ERROR: the wayland global " <> show targetInterface <> " not found") >> exitFailure)
+        putTextLn $ mconcat ["Trying to bind to", show targetInterface, "... (", show count, ")"]
         env <- ask
         globals <- readIORef globalsRef
         case findInterface globals of
@@ -584,10 +595,10 @@ wlToText = decodeUtf8 . BSL.toStrict . BSL.takeWhile (/= 0) . (.unWlString)
 {- | Convenience function for formatting events.
 Events are colored in magenta following the wayland.app colorscheme.
 -}
-strReq :: (String, ObjectID a, String) -> String -> IO ()
+strReq :: (Text, ObjectID a, Text) -> Text -> IO ()
 strReq (object, objectID, method) text = do
   colorize <- getColorize
-  putStrLn . colorize Vivid Magenta $ mconcat ["        -> ", object, "@", show objectID, ".", method, ": ", text]
+  putTextLn . colorize Vivid Magenta $ mconcat ["        -> ", object, "@", show objectID, ".", method, ": ", text]
   where
     getColorize :: (IsString s, Semigroup s) => IO (ColorIntensity -> Color -> s -> s)
     getColorize = do
