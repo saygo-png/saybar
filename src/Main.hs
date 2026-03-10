@@ -7,10 +7,8 @@ import Codec.Picture (PixelRGBA8 (..))
 import Codec.Picture.Types (Image)
 import Config
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.STM (check)
 import Control.Exception
 import Data.ByteString.Lazy hiding (count)
-import GHC.Conc (orElse)
 import GHC.IO.Handle
 import Graphics.Text.TrueType (loadFontFile)
 import Network.Socket
@@ -47,34 +45,35 @@ program = do
       (close env.socket)
 
   registryID <- wlDisplay_getRegistry
+
   -- `pendingRef` accumulates event-by-event within a batch.
-  -- `committedRef` is only updated on `done` and is what gets rendered.
-  -- This means the render loop always sees a consistent snapshot.
+  -- `committed` is only updated on `done` and is what gets rendered.
+  -- This means the render loop always sees a consistent snapshot (is atomic).
   pendingRef :: IORef WorkspaceMap <- newIORef mempty
-  committedRef :: IORef WorkspaceMap <- newIORef mempty
-  timerFired :: TVar Bool <- newTVarIO False
+  committed :: TVar WorkspaceMap <- newTVarIO mempty
+  wakeUp :: TMVar () <- newEmptyTMVarIO
   serial :: TMVar WlUint <- newEmptyTMVarIO
   freeBuffer :: MVar () <- newEmptyMVar
-  dirty :: TMVar () <- newEmptyTMVarIO
-  previousState :: IORef BarState <- newIORef $ BarState mempty mempty
 
   putStrLn "Binding to required interfaces..."
   wlShmID <- bindToInterface registryID env.globals "wl_shm" WlShm
   wlCompositorID <- bindToInterface registryID env.globals "wl_compositor" WlCompositor
   zwlrLayerShellV1ID <- bindToInterface registryID env.globals "zwlr_layer_shell_v1" ZwlrLayerShellV1
   _extWorkspaceManagerV1ID <- bindToInterface registryID env.globals "ext_workspace_manager_v1" ExtWorkspaceManagerV1
+
   onEvent $ \ev -> liftIO $ case ev of
     EvExtWorkspaceManagerV1_done _ _ -> do
-      -- Batch complete: promote pending to committed.
-      readIORef pendingRef >>= writeIORef committedRef
-      atomically $ void $ tryPutTMVar dirty ()
+      pending <- readIORef pendingRef
+      atomically $ do
+        writeTVar committed pending
+        void $ tryPutTMVar wakeUp ()
     _ ->
       modifyIORef pendingRef (`workspaceEventsHandler` ev)
 
   onEvent $ \case
-    (EvZwlrLayerSurfaceV1_configure _ body) -> do
+    (EvZwlrLayerSurfaceV1_configure _ body) ->
       atomically $ putTMVar serial body.serial
-    (EvWlBuffer_release _ _) -> do
+    (EvWlBuffer_release _ _) ->
       takeMVar freeBuffer
     _ -> pure ()
 
@@ -101,33 +100,27 @@ program = do
 
           fileHandle <- liftIO $ fdToHandle fileDescriptor
 
-          let waitForUpdate =
-                atomically
-                  $
-                  -- Wake on workspace change...
-                  takeTMVar dirty
-                  -- ...or when the timer fires
-                  `orElse` (readTVar timerFired >>= check)
-
           -- Cycle through buffers only when we actually render.
           -- If state is unchanged we loop back with the same buffer,
           -- so we never write to a buffer that's still in use.
-          let renderLoop (buf : rest) = do
-                waitForUpdate
-                atomically $ writeTVar timerFired False
-                mBarState <- liftIO $ getBarState committedRef previousState
-                case mBarState of
-                  Nothing -> renderLoop (buf : rest) -- unchanged, skip render
-                  Just barState -> do
-                    putImage wlSurfaceID fileHandle (renderBarState font barState) buf freeBuffer
+          let renderLoop :: (Buffer, Buffer) -> BarState -> Wayland ()
+              renderLoop buffers prevState = do
+                atomically $ takeTMVar wakeUp
+                workspaceMap <- readTVarIO committed
+                mNewState <- liftIO $ getBarState workspaceMap prevState
+                case mNewState of
+                  Nothing -> renderLoop buffers prevState
+                  Just newState -> do
+                    let currentBuffer = fst buffers
+                    putImage wlSurfaceID fileHandle (renderBarState font newState) currentBuffer freeBuffer
                     putTextLn "rerender!!!"
-                    renderLoop (rest ++ [buf])
-              renderLoop [] = error "empty buffer list" -- unreachable
+                    renderLoop (swap buffers) newState
+
           liftIO . void . forkIO . forever $ do
             threadDelay (60000 * 1000)
-            atomically $ writeTVar timerFired True
+            atomically $ void $ tryPutTMVar wakeUp ()
 
-          renderLoop [bufferA, bufferB]
+          renderLoop (bufferA, bufferB) (BarState mempty mempty)
 
   liftIO . void $ bracket makeSharedMemoryObject removeSharedMemoryObject useSharedMemoryObject
 

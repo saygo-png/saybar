@@ -75,20 +75,14 @@ resolveWorkspaces m =
       Just (Workspace n c s)
     promote _ = Nothing
 
-getBarState :: IORef WorkspaceMap -> IORef BarState -> IO (Maybe BarState)
-getBarState mapRef previousStateRef = do
-  workspaces <- readIORef mapRef
-  case resolveWorkspaces workspaces of
+getBarState :: WorkspaceMap -> BarState -> IO (Maybe BarState)
+getBarState workspaceMap prevState =
+  case resolveWorkspaces workspaceMap of
     Nothing -> pure Nothing
     Just ws -> do
       date <- getDate
       let newState = BarState date ws
-      prevState <- readIORef previousStateRef
-      if newState == prevState
-        then pure Nothing
-        else do
-          writeIORef previousStateRef newState
-          pure $ Just newState
+      pure $ if newState == prevState then Nothing else Just newState
   where
     getDate :: IO Text
     getDate = do
