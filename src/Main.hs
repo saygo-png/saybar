@@ -31,11 +31,9 @@ waylandSetup = do
   counter <- newIORef 2 -- start from 2 because wl_display is always 1
   globals <- newIORef mempty
   objects <- newIORef mempty
-  serial <- newEmptyTMVarIO
-  freeBuffer <- newEmptyMVar
   handlers <- newIORef mempty
 
-  pure $ WaylandEnv sock counter globals objects serial freeBuffer handlers
+  pure $ WaylandEnv sock counter globals objects handlers
 
 program :: Wayland ()
 program = do
@@ -52,10 +50,13 @@ program = do
   -- `pendingRef` accumulates event-by-event within a batch.
   -- `committedRef` is only updated on `done` and is what gets rendered.
   -- This means the render loop always sees a consistent snapshot.
-  pendingRef <- liftIO $ newIORef (mempty :: WorkspaceMap)
-  committedRef <- liftIO $ newIORef (mempty :: WorkspaceMap)
-  timerFired <- liftIO $ newTVarIO False
-  dirty <- liftIO newEmptyTMVarIO
+  pendingRef :: IORef WorkspaceMap <- newIORef mempty
+  committedRef :: IORef WorkspaceMap <- newIORef mempty
+  timerFired :: TVar Bool <- newTVarIO False
+  serial :: TMVar WlUint <- newEmptyTMVarIO
+  freeBuffer :: MVar () <- newEmptyMVar
+  dirty :: TMVar () <- newEmptyTMVarIO
+  previousState :: IORef BarState <- newIORef $ BarState mempty mempty
 
   putStrLn "Binding to required interfaces..."
   wlShmID <- bindToInterface registryID env.globals "wl_shm" WlShm
@@ -70,13 +71,20 @@ program = do
     _ ->
       modifyIORef pendingRef (`workspaceEventsHandler` ev)
 
+  onEvent $ \case
+    (EvZwlrLayerSurfaceV1_configure _ body) -> do
+      atomically $ putTMVar serial body.serial
+    (EvWlBuffer_release _ _) -> do
+      takeMVar freeBuffer
+    _ -> pure ()
+
   wlSurfaceID <- wlCompositor_createSurface wlCompositorID
   layerSurfaceID <- zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID 2 "saybar"
   zwlrLayerSurfaceV1_setAnchor layerSurfaceID 13 -- top left right anchors
   zwlrLayerSurfaceV1_setSize layerSurfaceID 0 $ fromIntegral bufferHeight
   zwlrLayerSurfaceV1_setExclusiveZone layerSurfaceID bufferHeight
   wlSurface_commit wlSurfaceID
-  zwlrLayerSurfaceV1_ackConfigure layerSurfaceID
+  zwlrLayerSurfaceV1_ackConfigure layerSurfaceID =<< atomically (takeTMVar serial)
 
   font <- either (error . toText) pure =<< liftIO (loadFontFile "CourierPrime-Regular.ttf")
 
@@ -104,13 +112,13 @@ program = do
           let renderLoop = do
                 waitForUpdate
                 atomically $ writeTVar timerFired False
-                img <- renderBarState font <$> liftIO (getBarState committedRef)
-                putImage wlSurfaceID fileHandle img bufferA
+                img <- renderBarState font <$> liftIO (getBarState committedRef previousState)
+                putImage wlSurfaceID fileHandle img bufferA freeBuffer
 
                 waitForUpdate
                 atomically $ writeTVar timerFired False
-                img2 <- renderBarState font <$> liftIO (getBarState committedRef)
-                putImage wlSurfaceID fileHandle img2 bufferB
+                img2 <- renderBarState font <$> liftIO (getBarState committedRef previousState)
+                putImage wlSurfaceID fileHandle img2 bufferB freeBuffer
                 renderLoop
 
           liftIO . void . forkIO . forever $ do
@@ -121,9 +129,8 @@ program = do
 
   liftIO . void $ bracket makeSharedMemoryObject removeSharedMemoryObject useSharedMemoryObject
 
-putImage :: ObjectID 'WlSurface -> Handle -> Image PixelRGBA8 -> Buffer -> Wayland ()
-putImage wlSurfaceID fileHandle image buffer = do
-  freeBuffer <- asks (.freeBuffer)
+putImage :: ObjectID 'WlSurface -> Handle -> Image PixelRGBA8 -> Buffer -> MVar () -> Wayland ()
+putImage wlSurfaceID fileHandle image buffer freeBuffer = do
   liftIO . hSeek fileHandle AbsoluteSeek $ fromIntegral buffer.offset
   liftIO . hPut fileHandle $ swizzleRGBAtoBGRA image
   wlSurface_damageBuffer wlSurfaceID 0 0 bufferWidth bufferHeight

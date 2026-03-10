@@ -5,19 +5,27 @@ module Types where
 import Relude
 import Saywayland
 
-type WorkspaceMap = Map WlID WorkspaceInfo
-
 data WorkspaceState = Active | Urgent | Hidden | Inactive
   deriving stock (Show, Eq, Ord)
 
-data WorkspaceInfo = WorkspaceInfo
-  { wsName :: Text
-  , wsState :: WorkspaceState
-  }
-  deriving stock (Show)
+-- Accumulation phase: all fields optional as events trickle in
+data PendingWorkspace = PendingWorkspace
+  { pwName        :: Maybe Text
+  , pwCoordinates :: Maybe Int
+  , pwState       :: Maybe WorkspaceState
+  } deriving stock (Show)
+
+-- Render phase: fully resolved, no Maybes, safe to use directly
+data Workspace = Workspace
+  { wsName        :: Text
+  , wsCoordinates :: Int
+  , wsState       :: WorkspaceState
+  } deriving stock (Show)
+
+type WorkspaceMap = Map WlID PendingWorkspace
 
 data BarState = BarState
   { date :: Text
-  , workspaces :: [WorkspaceInfo]
+  , workspaces :: [Workspace]
   }
   deriving stock (Show)

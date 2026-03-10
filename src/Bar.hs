@@ -3,7 +3,6 @@ module Bar (swizzleRGBAtoBGRA, getBarState, renderBarState, workspaceEventsHandl
 import Codec.Picture (PixelRGBA8 (..), imageData)
 import Codec.Picture.Types (Image)
 import Config
-import Data.Binary
 import Data.Bits
 import Data.ByteString.Lazy qualified as BSL
 import Data.Map qualified as Map
@@ -32,13 +31,27 @@ workspaceEventsHandler workspaces = \case
   EvExtWorkspaceHandleV1_name h e ->
     Map.alter
       ( \case
-          Nothing -> pure $ WorkspaceInfo (wlToText e.name) Inactive
-          Just w -> pure w{wsName = wlToText e.name}
+          Nothing -> pure $ PendingWorkspace (Just $ wlToText e.name) Nothing Nothing
+          Just w -> pure w{pwName = Just $ wlToText e.name}
+      )
+      h.objectID
+      workspaces
+  EvExtWorkspaceHandleV1_coordinates h e ->
+    Map.alter
+      ( \case
+          Nothing -> pure $ PendingWorkspace Nothing (Just . fromIntegral $ sum e.coordinates) Nothing
+          Just w -> pure w{pwCoordinates = Just . fromIntegral $ sum e.coordinates}
       )
       h.objectID
       workspaces
   EvExtWorkspaceHandleV1_state h e ->
-    Map.adjust (\w -> w{wsState = decodeState e.state}) h.objectID workspaces
+    Map.alter
+      ( \case
+          Nothing -> pure $ PendingWorkspace Nothing Nothing (Just $ decodeState e.state)
+          Just w -> pure w{pwState = Just $ decodeState e.state}
+      )
+      h.objectID
+      workspaces
     where
       -- https://wayland.app/protocols/ext-workspace-v1#ext_workspace_handle_v1:enum:state
       decodeState s
@@ -50,12 +63,29 @@ workspaceEventsHandler workspaces = \case
     Map.delete h.objectID workspaces
   _ -> workspaces
 
-getBarState :: IORef WorkspaceMap -> IO BarState
-getBarState mapRef = do
-  workspaces <- Map.elems <$> readIORef mapRef
-  date <- getDate
-  print $ BarState date workspaces
-  pure $ BarState date workspaces
+{- | Attempt to promote all pending workspaces to fully resolved ones.
+Returns Nothing if any workspace is still missing fields.
+Workspaces are sorted by coordinates so rendering order is stable.
+-}
+resolveWorkspaces :: WorkspaceMap -> Maybe [Workspace]
+resolveWorkspaces m =
+  sortOn (.wsCoordinates) <$> traverse promote (Map.elems m)
+  where
+    promote (PendingWorkspace (Just n) (Just c) (Just s)) =
+      Just (Workspace n c s)
+    promote _ = Nothing
+
+getBarState :: IORef WorkspaceMap -> IORef BarState -> IO BarState
+getBarState mapRef previousStateRef = do
+  workspaces <- readIORef mapRef
+  case resolveWorkspaces workspaces of
+    Nothing -> readIORef previousStateRef
+    Just ws -> do
+      date <- getDate
+      let barState = BarState date ws
+      print barState
+      writeIORef previousStateRef barState
+      pure barState
   where
     getDate :: IO Text
     getDate = do
@@ -68,11 +98,11 @@ renderBarState font barState = do
       drawColor = PixelRGBA8 213 196 161 255 -- #d5c4a1
       workspaceNames =
         T.intercalate " "
-          $ map
+          $ mapMaybe
             ( \w -> case w.wsState of
-                Active -> "[" <> w.wsName <> "]"
-                Hidden -> mempty
-                _ -> w.wsName
+                Hidden -> Nothing
+                Active -> Just $ "[" <> w.wsName <> "]"
+                _ -> Just w.wsName
             )
             barState.workspaces
 

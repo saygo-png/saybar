@@ -109,19 +109,19 @@ type role WlArray representational
 
 -- | Wayland array type.
 newtype WlArray a = WlArray [a]
-  deriving stock (Show)
+  deriving stock (Show, Foldable)
 
 -- | Little-endian length-prefixed array of Word32.
-instance Binary (WlArray Word32) where
+instance Binary (WlArray WlUint) where
   get = do
     len <- getWord32le
     bytes <- getLazyByteString $ roundLength len
     let elems = runGet (replicateM (fromIntegral len `div` 4) getWord32le) bytes
-    return $ WlArray elems
+    return $ WlArray (coerce elems)
   put (WlArray xs) = do
     let len = fromIntegral (Relude.length xs * 4) :: Word32
     putWord32le len
-    mapM_ putWord32le xs
+    mapM_ putWord32le ((.unWlUint) <$> xs)
 
 -- | Type representing Wayland color formats.
 data WlColorFormat
@@ -167,7 +167,7 @@ $( declareEvents
      , --
        event "ExtWorkspaceHandleV1" 0 "id" [("id", ty ''WlString)]
      , event "ExtWorkspaceHandleV1" 1 "name" [("name", ty ''WlString)]
-     , event "ExtWorkspaceHandleV1" 2 "coordinates" [("coordinates", appTy ''WlArray ''Word32)]
+     , event "ExtWorkspaceHandleV1" 2 "coordinates" [("coordinates", appTy ''WlArray ''WlUint)]
      , event "ExtWorkspaceHandleV1" 3 "state" [("state", ty ''WlUint)]
      , event "ExtWorkspaceHandleV1" 4 "capabilities" [("capabilities", ty ''WlUint)]
      , event "ExtWorkspaceHandleV1" 5 "removed" []
@@ -186,16 +186,6 @@ $( declareEvents
 -- | Globals storage by name.
 type Globals = Map WlUint (Header, BodyWlRegistry_global)
 
--- | Type representing a Wayland serial code with some context.
-data Serial = Serial
-  { serialCode :: WlUint
-  -- ^ The serial code itself
-  , originInterface :: WaylandInterface
-  -- ^ The interface that the serial code originated from.
-  , originID :: WlID
-  -- ^ The ID of object that the serial code originated from.
-  }
-
 {- | Record containing the essential state needed for Wayland.
 The state contained is only essential, the user is expected to make their own structures
 to store state required for their specific application. This can be done using event handlers made with 'onEvent'.
@@ -209,8 +199,6 @@ data WaylandEnv = WaylandEnv
   -- ^ Map of received globals. Globals might be removed.
   , objects :: IORef (Map WlID WaylandInterface)
   -- ^ Map of existing objects. Objects might be removed.
-  , serial :: TMVar WlUint
-  , freeBuffer :: MVar ()
   , eventHandlers :: IORef [WaylandEvent -> Wayland ()]
   -- ^ List of custom event handlers. Use 'onEvent' to add a custom handler.
   }
@@ -360,12 +348,11 @@ zwlrLayerSurfaceV1_setSize zwlrLayerSurfaceV1ID width height = do
         put height
   sendMessage zwlrLayerSurfaceV1ID 0 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "set_size")
-  liftIO . strReq sender $ "width=" <> show width <> "height=" <> show height
+  liftIO . strReq sender $ mconcat ["width=", show width, " height=", show height]
 
 -- | https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_surface_v1:request:ack_configure
-zwlrLayerSurfaceV1_ackConfigure :: ObjectID 'ZwlrLayerSurfaceV1 -> Wayland ()
-zwlrLayerSurfaceV1_ackConfigure zwlrLayerSurfaceV1ID = do
-  serial <- atomically . takeTMVar =<< asks (.serial)
+zwlrLayerSurfaceV1_ackConfigure :: ObjectID 'ZwlrLayerSurfaceV1 -> WlUint -> Wayland ()
+zwlrLayerSurfaceV1_ackConfigure zwlrLayerSurfaceV1ID serial = do
   let messageBody = runPut $ put serial
   sendMessage zwlrLayerSurfaceV1ID 6 messageBody
   let sender = ("zwlr_layer_surface_v1", zwlrLayerSurfaceV1ID, "ack_configure")
@@ -512,13 +499,9 @@ It also processes events through custom handlers defined by 'onEvent', after the
 handleEventResponse :: WaylandEvent -> Wayland ()
 handleEventResponse ev = do
   case ev of
-    (EvWlBuffer_release _ _) -> takeMVar =<< asks (.freeBuffer)
     (EvWlRegistry_global h body) -> do
       globals <- asks (.globals)
       modifyIORef globals $ Map.insert body.name (h, body)
-    (EvZwlrLayerSurfaceV1_configure _ body) -> do
-      serial <- asks (.serial)
-      atomically $ putTMVar serial body.serial
     (EvExtWorkspaceManagerV1_workspace _ body) -> do
       objects <- asks (.objects)
       modifyIORef objects $ Map.insert (coerce body.handleID) ExtWorkspaceHandleV1
