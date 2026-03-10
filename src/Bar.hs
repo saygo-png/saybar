@@ -75,21 +75,27 @@ resolveWorkspaces m =
       Just (Workspace n c s)
     promote _ = Nothing
 
-getBarState :: IORef WorkspaceMap -> IORef BarState -> IO BarState
+getBarState :: IORef WorkspaceMap -> IORef BarState -> IO (Maybe BarState)
 getBarState mapRef previousStateRef = do
   workspaces <- readIORef mapRef
   case resolveWorkspaces workspaces of
-    Nothing -> readIORef previousStateRef
+    Nothing -> pure Nothing
     Just ws -> do
       date <- getDate
-      let barState = BarState date ws
-      print barState
-      writeIORef previousStateRef barState
-      pure barState
+      let newState = BarState date ws
+      prevState <- readIORef previousStateRef
+      if newState == prevState
+        then pure Nothing
+        else do
+          writeIORef previousStateRef newState
+          pure $ Just newState
   where
     getDate :: IO Text
     getDate = do
-      (dateOut, _dateErr) <- readProcess_ "date"
+      (dateOut, _dateErr) <-
+        readProcess_
+          $ setEnv [("LC_ALL", "C")]
+          $ proc "date" ["+%a %Y-%m(%B)-%d %H:%M"]
       pure . decodeUtf8 . BSL.reverse . BSL.drop 1 $ BSL.reverse dateOut
 
 renderBarState :: Font -> BarState -> Image PixelRGBA8

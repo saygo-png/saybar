@@ -109,23 +109,25 @@ program = do
                   -- ...or when the timer fires
                   `orElse` (readTVar timerFired >>= check)
 
-          let renderLoop = do
+          -- Cycle through buffers only when we actually render.
+          -- If state is unchanged we loop back with the same buffer,
+          -- so we never write to a buffer that's still in use.
+          let renderLoop (buf : rest) = do
                 waitForUpdate
                 atomically $ writeTVar timerFired False
-                img <- renderBarState font <$> liftIO (getBarState committedRef previousState)
-                putImage wlSurfaceID fileHandle img bufferA freeBuffer
-
-                waitForUpdate
-                atomically $ writeTVar timerFired False
-                img2 <- renderBarState font <$> liftIO (getBarState committedRef previousState)
-                putImage wlSurfaceID fileHandle img2 bufferB freeBuffer
-                renderLoop
-
+                mBarState <- liftIO $ getBarState committedRef previousState
+                case mBarState of
+                  Nothing -> renderLoop (buf : rest) -- unchanged, skip render
+                  Just barState -> do
+                    putImage wlSurfaceID fileHandle (renderBarState font barState) buf freeBuffer
+                    putTextLn "rerender!!!"
+                    renderLoop (rest ++ [buf])
+              renderLoop [] = error "empty buffer list" -- unreachable
           liftIO . void . forkIO . forever $ do
-            threadDelay (1000 * 1000) -- 1 second
+            threadDelay (60000 * 1000)
             atomically $ writeTVar timerFired True
 
-          renderLoop
+          renderLoop [bufferA, bufferB]
 
   liftIO . void $ bracket makeSharedMemoryObject removeSharedMemoryObject useSharedMemoryObject
 

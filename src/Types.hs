@@ -10,17 +10,19 @@ data WorkspaceState = Active | Urgent | Hidden | Inactive
 
 -- Accumulation phase: all fields optional as events trickle in
 data PendingWorkspace = PendingWorkspace
-  { pwName        :: Maybe Text
+  { pwName :: Maybe Text
   , pwCoordinates :: Maybe Int
-  , pwState       :: Maybe WorkspaceState
-  } deriving stock (Show)
+  , pwState :: Maybe WorkspaceState
+  }
+  deriving stock (Show)
 
 -- Render phase: fully resolved, no Maybes, safe to use directly
 data Workspace = Workspace
-  { wsName        :: Text
+  { wsName :: Text
   , wsCoordinates :: Int
-  , wsState       :: WorkspaceState
-  } deriving stock (Show)
+  , wsState :: WorkspaceState
+  }
+  deriving stock (Show, Eq)
 
 type WorkspaceMap = Map WlID PendingWorkspace
 
@@ -28,4 +30,4 @@ data BarState = BarState
   { date :: Text
   , workspaces :: [Workspace]
   }
-  deriving stock (Show)
+  deriving stock (Show, Eq)
