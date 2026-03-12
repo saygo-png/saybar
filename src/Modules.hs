@@ -2,14 +2,14 @@ module Modules (module Modules) where
 
 import Codec.Picture (PixelRGBA8 (PixelRGBA8))
 import Control.Concurrent (forkIO, threadDelay)
-import Data.ByteString.Lazy qualified as BSL
-import Data.Text qualified as T
+import Data.Time (formatTime)
+import Data.Time.Format (defaultTimeLocale)
+import Data.Time.LocalTime (getZonedTime)
 import Graphics.Rasterific
 import Graphics.Rasterific.Texture
-import Graphics.Text.TrueType (BoundingBox (..), Font, PointSize (..), stringBoundingBox)
+import Graphics.Text.TrueType (BoundingBox (..), Font, stringBoundingBox)
 import Relude hiding (ByteString, get, isPrefixOf, put)
 import Saywayland
-import System.Process.Typed
 import Types
 
 -- | How a module decides when to refresh.
@@ -60,6 +60,14 @@ startModules mods wakeUp =
     OnWaylandEvent handler ->
       onEvent handler
 
+-- | Render a date/time string at the origin.
+renderDate :: RenderFrom Text
+renderDate ctx t =
+  ( withTexture (uniformTexture ctx.drawColor)
+      $ printTextAt ctx.font ctx.fontSize (V2 0 0) (toString t)
+  , textWidth ctx t
+  )
+
 -- | Current date/time, refreshed every second.
 dateModule :: BarModule
 dateModule =
@@ -71,21 +79,37 @@ dateModule =
   where
     getDate :: IO Text
     getDate = do
-      (out, _) <-
-        readProcess_
-          $ setEnv [("LC_ALL", "C")]
-          $ proc "date" ["+%a %Y-%m(%B)-%d %H:%M"]
-      pure . decodeUtf8 . BSL.reverse . BSL.drop 1 $ BSL.reverse out
+      now <- getZonedTime
+      pure . toText $ formatTime defaultTimeLocale "%a %Y-%m(%B)-%d %H:%M" now
 
-    renderDate :: RenderFrom Text
-    renderDate ctx t =
-      ( withTexture (uniformTexture ctx.drawColor)
-          $ printTextAt ctx.font ctx.fontSize (V2 0 0) (toString t)
-      , textWidth ctx t
-      )
+{- | Render the workspace list.
+  Active workspace is highlighted, Urgent is red, Hidden is skipped.
+-}
+renderWorkspaces :: RenderFrom [Workspace]
+renderWorkspaces ctx workspaces =
+  foldl' drawOne (pure (), 0) visible
+  where
+    spacing :: Float = 10
+    activeColor = PixelRGBA8 251 241 199 255
+    urgentColor = PixelRGBA8 251 73 52 255
+
+    visible = mapMaybe toLabel workspaces
+    toLabel w = case w.wsState of
+      Hidden -> Nothing
+      Active -> Just ("[" <> w.wsName <> "]", activeColor)
+      Urgent -> Just ("!" <> w.wsName <> "!", urgentColor)
+      Inactive -> Just (w.wsName, ctx.drawColor)
+
+    drawOne (acc, curX) (label, color) =
+      let drawing =
+            acc
+              >> withTexture
+                (uniformTexture color)
+                (printTextAt ctx.font ctx.fontSize (V2 curX 0) (toString label))
+          nextX = curX + textWidth ctx label + spacing
+       in (drawing, nextX)
 
 {- | Workspace list.
-  Active workspace is highlighted, Urgent is red, Hidden is skipped.
   Pass a TVar kept up to date by workspaceEventsHandler in Bar.hs.
 -}
 workspaceModule :: TVar [Workspace] -> BarModule
@@ -95,27 +119,3 @@ workspaceModule wsVar =
     , getData = readTVarIO wsVar
     , render = renderWorkspaces
     }
-  where
-    renderWorkspaces :: RenderFrom [Workspace]
-    renderWorkspaces ctx workspaces =
-      foldl' drawOne (pure (), 0) visible
-      where
-        spacing :: Float = 10
-        activeColor = PixelRGBA8 251 241 199 255
-        urgentColor = PixelRGBA8 251 73 52 255
-
-        visible = mapMaybe toLabel workspaces
-        toLabel w = case w.wsState of
-          Hidden -> Nothing
-          Active -> Just ("[" <> w.wsName <> "]", activeColor)
-          Urgent -> Just ("!" <> w.wsName <> "!", urgentColor)
-          Inactive -> Just (w.wsName, ctx.drawColor)
-
-        drawOne (acc, curX) (label, color) =
-          let drawing =
-                acc
-                  >> withTexture
-                    (uniformTexture color)
-                    (printTextAt ctx.font ctx.fontSize (V2 curX 0) (toString label))
-              nextX = curX + textWidth ctx label + spacing
-           in (drawing, nextX)

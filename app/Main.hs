@@ -8,9 +8,7 @@ import Codec.Picture.Types (Image)
 import Config
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Exception
-import Data.ByteString.Lazy hiding (count)
 import Data.Map qualified as Map
-import Data.Time.Clock (diffUTCTime, getCurrentTime)
 import GHC.IO.Handle
 import Graphics.Text.TrueType (PointSize (PointSize), loadFontFile)
 import Modules
@@ -113,10 +111,8 @@ program = do
               renderLoop buffers = do
                 atomically $ takeTMVar wakeUp
                 image <- liftIO $ renderBar ctx modules
-                t0 <- liftIO getCurrentTime
                 putImage wlSurfaceID fileHandle image (fst buffers) freeBuffer
-                t1 <- liftIO getCurrentTime
-                putTextLn $ "rerender!!! took " <> show (diffUTCTime t1 t0)
+                putTextLn $ "rerender!!!"
                 renderLoop (swap buffers)
 
           renderLoop (bufferA, bufferB)
@@ -134,7 +130,7 @@ program = do
     putImage :: ObjectID 'WlSurface -> Handle -> Image PixelRGBA8 -> Buffer -> MVar () -> Wayland ()
     putImage wlSurfaceID fileHandle image buffer freeBuffer = do
       liftIO . hSeek fileHandle AbsoluteSeek $ fromIntegral buffer.offset
-      liftIO . hPut fileHandle $ swizzleRGBAtoBGRA image
+      liftIO $ writeSwizzledRGBAtoBGRA fileHandle image
       wlSurface_damageBuffer wlSurfaceID 0 0 bufferWidth bufferHeight
       wlSurface_attach wlSurfaceID buffer.id
       wlSurface_commit wlSurfaceID

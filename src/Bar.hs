@@ -1,12 +1,12 @@
-module Bar (swizzleRGBAtoBGRA, workspaceEventsHandler, renderBar) where
+module Bar (writeSwizzledRGBAtoBGRA, workspaceEventsHandler, renderBar) where
 
 import Codec.Picture (PixelRGBA8 (..), imageData)
 import Codec.Picture.Types (Image)
 import Config
 import Data.Bits
-import Data.ByteString.Lazy qualified as BSL
 import Data.Map qualified as Map
 import Data.Vector.Storable qualified as VS
+import GHC.IO.Handle (hPutBuf)
 import Graphics.Rasterific
 import Graphics.Rasterific.Transformations
 import Modules
@@ -14,15 +14,24 @@ import Relude hiding (ByteString, get, isPrefixOf, put)
 import Saywayland
 import Types
 
-swizzleRGBAtoBGRA :: Image PixelRGBA8 -> BSL.ByteString
-swizzleRGBAtoBGRA image =
-  BSL.pack . go . VS.toList $ imageData image
+writeSwizzledRGBAtoBGRA :: Handle -> Image PixelRGBA8 -> IO ()
+writeSwizzledRGBAtoBGRA handle image =
+  VS.unsafeWith swizzled $ \ptr ->
+    hPutBuf handle ptr (VS.length swizzled)
   where
-    go [] = []
-    go (r : g : b : a : rest) =
-      let premul c = fromIntegral (fromIntegral c * fromIntegral a `div` 255 :: Word16)
-       in premul b : premul g : premul r : a : go rest
-    go _ = []
+    px = imageData image
+    premul c a = fromIntegral (fromIntegral c * fromIntegral a `div` 255 :: Word16)
+    swizzled = VS.generate (VS.length px) $ \i ->
+      let base = (i `div` 4) * 4
+          r = VS.unsafeIndex px base
+          g = VS.unsafeIndex px (base + 1)
+          b = VS.unsafeIndex px (base + 2)
+          a = VS.unsafeIndex px (base + 3)
+       in case i `mod` 4 of
+            0 -> premul b a
+            1 -> premul g a
+            2 -> premul r a
+            _ -> a
 
 workspaceEventsHandler :: WorkspaceMap -> WaylandEvent -> WorkspaceMap
 workspaceEventsHandler workspaces = \case

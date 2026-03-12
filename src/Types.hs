@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 module Types where
 
@@ -8,7 +9,8 @@ import Graphics.Rasterific (Drawing)
 import Codec.Picture (PixelRGBA8)
 
 data WorkspaceState = Active | Urgent | Hidden | Inactive
-  deriving stock (Show, Eq, Ord)
+  deriving stock (Show, Eq, Ord, Generic)
+  deriving anyclass (NFData)
 
 -- Accumulation phase: all fields optional as events trickle in
 data PendingWorkspace = PendingWorkspace
@@ -16,7 +18,8 @@ data PendingWorkspace = PendingWorkspace
   , pwCoordinates :: Maybe Int
   , pwState :: Maybe WorkspaceState
   }
-  deriving stock (Show)
+  deriving stock (Show, Generic)
+  deriving anyclass (NFData)
 
 -- Render phase: fully resolved, no Maybes, safe to use directly
 data Workspace = Workspace
@@ -24,7 +27,8 @@ data Workspace = Workspace
   , wsCoordinates :: Int
   , wsState :: WorkspaceState
   }
-  deriving stock (Show, Eq)
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (NFData)
 
 type WorkspaceMap = Map WlID PendingWorkspace
 
@@ -32,6 +36,7 @@ data BarState = BarState
   { date :: Text
   , workspaces :: [Workspace]
   }
-  deriving stock (Show, Eq)
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (NFData)
 
 type RenderResult = Drawing PixelRGBA8 ()

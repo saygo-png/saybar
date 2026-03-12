@@ -76,28 +76,59 @@ library saywayland
   hs-source-dirs:  lib
   exposed-modules: Saywayland, SaywaylandTH
 
-executable saybar
-  import:         common-options
+-- Internal library so that `src/` belongs to exactly one component.
+-- Both the executable and the benchmark depend on this; HLS can then
+-- unambiguously resolve every file under src/.
+library saybar-internal
+  import:          common-options
+  hs-source-dirs:  src
   build-depends:
     , binary
     , bytestring
     , containers
     , FontyFruity
     , JuicyPixels
-    , network
     , Rasterific
-    , typed-process
-    , unix
-    , vector
+    , saywayland
     , stm
+    , typed-process
+    , vector
     , time
-
-  ghc-options:    -rtsopts -with-rtsopts=-N
-  hs-source-dirs: src
-  main-is:        Main.hs
-  build-depends:  saywayland
-  other-modules:
+  exposed-modules:
     Bar
     Config
-    Types
     Modules
+    Types
+
+executable saybar
+  import:         common-options
+  ghc-options:    -rtsopts -with-rtsopts=-N
+  hs-source-dirs: app
+  main-is:        Main.hs
+  build-depends:
+    , network
+    , saybar-internal
+    , time
+    , unix
+    , binary
+    , bytestring
+    , containers
+    , FontyFruity
+    , JuicyPixels
+    , Rasterific
+    , saywayland
+    , stm
+    , typed-process
+    , vector
+
+
+benchmark saybar-bench
+  import:         common-options
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: bench
+  main-is:        Main.hs
+  build-depends:
+    , criterion
+    , JuicyPixels
+    , saybar-internal
+    , FontyFruity
