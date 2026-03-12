@@ -24,8 +24,9 @@ colorChannels = 4
   Called once from Main after the workspace TVar is created.
   Add, remove, or reorder modules here.
 -}
-makeModules :: TVar [Workspace] -> [BarModule]
+makeModules :: TVar [Workspace] -> [Either Spacer BarModule]
 makeModules wsVar =
-  [ workspaceModule wsVar
-  , dateModule
+  [ Right $ workspaceModule wsVar
+  , Left Spacer
+  , Right dateModule
   ]

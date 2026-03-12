@@ -65,7 +65,7 @@ workspaceEventsHandler workspaces = \case
   Each module's render function returns the pixel width it consumed,
   which advances the cursor for the next module.
 -}
-renderBar :: RenderCtx -> [BarModule] -> IO (Image PixelRGBA8)
+renderBar :: RenderCtx -> [Either Spacer BarModule] -> IO (Image PixelRGBA8)
 renderBar ctx modules = do
   let margin :: Float = 0
   let bgColor = PixelRGBA8 0 0 0 0
@@ -78,13 +78,19 @@ renderBar ctx modules = do
     -- At what height to render at>
     baseline :: Float = fromIntegral bufferHeight * 0.75
 
-    composeDrawings :: [(RenderResult, Float)] -> RenderResult
-    composeDrawings = go 0
+    composeDrawings :: [Either Spacer (RenderResult, Float)] -> RenderResult
+    composeDrawings barElements = go 0 barElements
       where
-        go :: Float -> [(RenderResult, Float)] -> RenderResult
+        spacerWidth = (bufferWidthF - elementsWidth) / spacerCount
+          where
+            elementsWidth = sum $ snd <$> rights barElements
+            bufferWidthF :: Float = fromIntegral bufferWidth
+            spacerCount = fromIntegral . length $ lefts barElements
+        go :: Float -> [Either Spacer (RenderResult, Float)] -> RenderResult
         go _ [] = mempty
-        go margin ((drawing, width) : rest) = do
+        go margin ((Right (drawing, width)) : rest) = do
           let otherDrawings = go (margin + width) rest
           let transformedDrawing = do
                 withTransformation (translate (V2 margin baseline)) drawing
           mconcat [transformedDrawing, otherDrawings]
+        go margin ((Left Spacer) : rest) = go (margin + spacerWidth) rest

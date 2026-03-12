@@ -10,8 +10,9 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Exception
 import Data.ByteString.Lazy hiding (count)
 import Data.Map qualified as Map
+import Data.Time.Clock (diffUTCTime, getCurrentTime)
 import GHC.IO.Handle
-import Graphics.Text.TrueType (loadFontFile)
+import Graphics.Text.TrueType (PointSize (PointSize), loadFontFile)
 import Modules
 import Network.Socket
 import Relude hiding (ByteString, get, isPrefixOf, put)
@@ -75,7 +76,7 @@ program = do
     _ -> pure ()
 
   let modules = makeModules workspacesVar
-  startModules modules wakeUp
+  startModules (rights modules) wakeUp
 
   wlSurfaceID <- wlCompositor_createSurface wlCompositorID
   layerSurfaceID <- zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID 2 "saybar"
@@ -90,6 +91,8 @@ program = do
   let ctx =
         RenderCtx
           { font = font
+          , fontSize = PointSize 11
+          , dpi = 96
           , drawColor = PixelRGBA8 213 196 161 255 -- #d5c4a1
           }
 
@@ -110,8 +113,10 @@ program = do
               renderLoop buffers = do
                 atomically $ takeTMVar wakeUp
                 image <- liftIO $ renderBar ctx modules
+                t0 <- liftIO getCurrentTime
                 putImage wlSurfaceID fileHandle image (fst buffers) freeBuffer
-                putTextLn "rerender!!!"
+                t1 <- liftIO getCurrentTime
+                putTextLn $ "rerender!!! took " <> show (diffUTCTime t1 t0)
                 renderLoop (swap buffers)
 
           renderLoop (bufferA, bufferB)

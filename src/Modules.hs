@@ -6,7 +6,7 @@ import Data.ByteString.Lazy qualified as BSL
 import Data.Text qualified as T
 import Graphics.Rasterific
 import Graphics.Rasterific.Texture
-import Graphics.Text.TrueType (Font)
+import Graphics.Text.TrueType (BoundingBox (..), Font, PointSize (..), stringBoundingBox)
 import Relude hiding (ByteString, get, isPrefixOf, put)
 import Saywayland
 import System.Process.Typed
@@ -21,6 +21,8 @@ data ModuleTrigger
 
 data RenderCtx = RenderCtx
   { font :: Font
+  , fontSize :: PointSize
+  , dpi :: Int
   , drawColor :: PixelRGBA8
   }
 
@@ -32,10 +34,17 @@ data BarModule = forall a. BarModule
   , render :: RenderFrom a
   }
 
--- | Fetch a module's data and produce (Drawing, widthConsumed).
-runModule :: RenderCtx -> BarModule -> IO (RenderResult, Float)
-runModule ctx (BarModule _ getData render) =
-  render ctx <$> getData
+data Spacer = Spacer
+
+runModule :: RenderCtx -> Either Spacer BarModule -> IO (Either Spacer (RenderResult, Float))
+runModule ctx (Right (BarModule _ getData render)) =
+  Right . render ctx <$> getData
+runModule _ (Left Spacer) = pure $ Left Spacer
+
+textWidth :: RenderCtx -> Text -> Float
+textWidth ctx str =
+  let bb = stringBoundingBox ctx.font ctx.dpi ctx.fontSize $ toString str
+   in bb._xMax
 
 {- | Start all modules.
   Timer modules fork a background thread that nudges wakeUp each tick.
@@ -71,8 +80,8 @@ dateModule =
     renderDate :: RenderFrom Text
     renderDate ctx t =
       ( withTexture (uniformTexture ctx.drawColor)
-          $ printTextAt ctx.font (PointSize 11) (V2 0 0) (toString t)
-      , fromIntegral (T.length t) * 8.0
+          $ printTextAt ctx.font ctx.fontSize (V2 0 0) (toString t)
+      , textWidth ctx t
       )
 
 {- | Workspace list.
@@ -107,6 +116,6 @@ workspaceModule wsVar =
                 acc
                   >> withTexture
                     (uniformTexture color)
-                    (printTextAt ctx.font (PointSize 11) (V2 curX 0) (toString label))
-              nextX = curX + fromIntegral (T.length label) * 8.0 + spacing
+                    (printTextAt ctx.font ctx.fontSize (V2 curX 0) (toString label))
+              nextX = curX + textWidth ctx label + spacing
            in (drawing, nextX)

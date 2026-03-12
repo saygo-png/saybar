@@ -90,6 +90,7 @@ executable saybar
     , unix
     , vector
     , stm
+    , time
 
   ghc-options:    -rtsopts -with-rtsopts=-N
   hs-source-dirs: src
