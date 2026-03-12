@@ -99,3 +99,4 @@ executable saybar
     Bar
     Config
     Types
+    Modules

@@ -4,6 +4,8 @@ module Types where
 
 import Relude
 import Saywayland
+import Graphics.Rasterific (Drawing)
+import Codec.Picture (PixelRGBA8)
 
 data WorkspaceState = Active | Urgent | Hidden | Inactive
   deriving stock (Show, Eq, Ord)
@@ -31,3 +33,5 @@ data BarState = BarState
   , workspaces :: [Workspace]
   }
   deriving stock (Show, Eq)
+
+type RenderResult = Drawing PixelRGBA8 ()

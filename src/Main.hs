@@ -9,8 +9,10 @@ import Config
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Exception
 import Data.ByteString.Lazy hiding (count)
+import Data.Map qualified as Map
 import GHC.IO.Handle
 import Graphics.Text.TrueType (loadFontFile)
+import Modules
 import Network.Socket
 import Relude hiding (ByteString, get, isPrefixOf, put)
 import Saywayland
@@ -22,27 +24,20 @@ import Types
 main :: IO ()
 main = do
   runReaderT program =<< waylandSetup
-
-waylandSetup :: IO WaylandEnv
-waylandSetup = do
-  sock <- connectToWlSocket
-  counter <- newIORef 2 -- start from 2 because wl_display is always 1
-  globals <- newIORef mempty
-  objects <- newIORef mempty
-  handlers <- newIORef mempty
-
-  pure $ WaylandEnv sock counter globals objects handlers
+  where
+    waylandSetup :: IO WaylandEnv
+    waylandSetup = do
+      sock <- connectToWlSocket
+      counter <- newIORef $ coerce wlDisplayID + 1
+      globals <- newIORef mempty
+      objects <- newIORef mempty
+      handlers <- newIORef mempty
+      pure $ WaylandEnv sock counter globals objects handlers
 
 program :: Wayland ()
 program = do
   env <- ask
-
-  liftIO
-    . void
-    . forkIO
-    $ finally
-      (putStrLn "\n--- Starting event loop ---" >> runReaderT eventLoop env)
-      (close env.socket)
+  startEventLoop env
 
   registryID <- wlDisplay_getRegistry
 
@@ -51,6 +46,7 @@ program = do
   -- This means the render loop always sees a consistent snapshot (is atomic).
   pendingRef :: IORef WorkspaceMap <- newIORef mempty
   committed :: TVar WorkspaceMap <- newTVarIO mempty
+  workspacesVar :: TVar [Workspace] <- newTVarIO mempty -- live workspace list
   wakeUp :: TMVar () <- newEmptyTMVarIO
   serial :: TMVar WlUint <- newEmptyTMVarIO
   freeBuffer :: MVar () <- newEmptyMVar
@@ -61,14 +57,15 @@ program = do
   zwlrLayerShellV1ID <- bindToInterface registryID env.globals "zwlr_layer_shell_v1" ZwlrLayerShellV1
   _extWorkspaceManagerV1ID <- bindToInterface registryID env.globals "ext_workspace_manager_v1" ExtWorkspaceManagerV1
 
-  onEvent $ \ev -> liftIO $ case ev of
+  onEvent $ \case
     EvExtWorkspaceManagerV1_done _ _ -> do
       pending <- readIORef pendingRef
+      let resolved = resolveWorkspaces pending
       atomically $ do
         writeTVar committed pending
+        forM_ resolved $ writeTVar workspacesVar
         void $ tryPutTMVar wakeUp ()
-    _ ->
-      modifyIORef pendingRef (`workspaceEventsHandler` ev)
+    ev -> modifyIORef pendingRef (`workspaceEventsHandler` ev)
 
   onEvent $ \case
     (EvZwlrLayerSurfaceV1_configure _ body) ->
@@ -76,6 +73,9 @@ program = do
     (EvWlBuffer_release _ _) ->
       takeMVar freeBuffer
     _ -> pure ()
+
+  let modules = makeModules workspacesVar
+  startModules modules wakeUp
 
   wlSurfaceID <- wlCompositor_createSurface wlCompositorID
   layerSurfaceID <- zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID 2 "saybar"
@@ -86,6 +86,12 @@ program = do
   zwlrLayerSurfaceV1_ackConfigure layerSurfaceID =<< atomically (takeTMVar serial)
 
   font <- either (error . toText) pure =<< liftIO (loadFontFile "CourierPrime-Regular.ttf")
+
+  let ctx =
+        RenderCtx
+          { font = font
+          , drawColor = PixelRGBA8 213 196 161 255 -- #d5c4a1
+          }
 
   let makeSharedMemoryObject = shmOpen poolName (ShmOpenFlags True True False True) (Relude.foldl' unionFileModes ownerWriteMode [ownerReadMode])
       removeSharedMemoryObject _ = shmUnlink poolName
@@ -100,36 +106,41 @@ program = do
 
           fileHandle <- liftIO $ fdToHandle fileDescriptor
 
-          -- Cycle through buffers only when we actually render.
-          -- If state is unchanged we loop back with the same buffer,
-          -- so we never write to a buffer that's still in use.
-          let renderLoop :: (Buffer, Buffer) -> BarState -> Wayland ()
-              renderLoop buffers prevState = do
+          let renderLoop :: (Buffer, Buffer) -> Wayland ()
+              renderLoop buffers = do
                 atomically $ takeTMVar wakeUp
-                workspaceMap <- readTVarIO committed
-                mNewState <- liftIO $ getBarState workspaceMap prevState
-                case mNewState of
-                  Nothing -> renderLoop buffers prevState
-                  Just newState -> do
-                    let currentBuffer = fst buffers
-                    putImage wlSurfaceID fileHandle (renderBarState font newState) currentBuffer freeBuffer
-                    putTextLn "rerender!!!"
-                    renderLoop (swap buffers) newState
+                image <- liftIO $ renderBar ctx modules
+                putImage wlSurfaceID fileHandle image (fst buffers) freeBuffer
+                putTextLn "rerender!!!"
+                renderLoop (swap buffers)
 
-          liftIO . void . forkIO . forever $ do
-            threadDelay (60000 * 1000)
-            atomically $ void $ tryPutTMVar wakeUp ()
-
-          renderLoop (bufferA, bufferB) (BarState mempty mempty)
+          renderLoop (bufferA, bufferB)
 
   liftIO . void $ bracket makeSharedMemoryObject removeSharedMemoryObject useSharedMemoryObject
+  where
+    startEventLoop env = do
+      liftIO
+        . void
+        . forkIO
+        $ finally
+          (putStrLn "\n--- Starting event loop ---" >> runReaderT eventLoop env)
+          (close env.socket)
 
-putImage :: ObjectID 'WlSurface -> Handle -> Image PixelRGBA8 -> Buffer -> MVar () -> Wayland ()
-putImage wlSurfaceID fileHandle image buffer freeBuffer = do
-  liftIO . hSeek fileHandle AbsoluteSeek $ fromIntegral buffer.offset
-  liftIO . hPut fileHandle $ swizzleRGBAtoBGRA image
-  wlSurface_damageBuffer wlSurfaceID 0 0 bufferWidth bufferHeight
-  wlSurface_attach wlSurfaceID buffer.id
-  wlSurface_commit wlSurfaceID
-  liftIO $ threadDelay 100000
-  putMVar freeBuffer ()
+    putImage :: ObjectID 'WlSurface -> Handle -> Image PixelRGBA8 -> Buffer -> MVar () -> Wayland ()
+    putImage wlSurfaceID fileHandle image buffer freeBuffer = do
+      liftIO . hSeek fileHandle AbsoluteSeek $ fromIntegral buffer.offset
+      liftIO . hPut fileHandle $ swizzleRGBAtoBGRA image
+      wlSurface_damageBuffer wlSurfaceID 0 0 bufferWidth bufferHeight
+      wlSurface_attach wlSurfaceID buffer.id
+      wlSurface_commit wlSurfaceID
+      liftIO $ threadDelay 100000
+      putMVar freeBuffer ()
+
+    -- \| Promote a WorkspaceMap to a clean sorted [Workspace].
+    --   Returns Nothing if any workspace is still missing fields.
+    resolveWorkspaces :: WorkspaceMap -> Maybe [Workspace]
+    resolveWorkspaces m =
+      sortOn (.wsCoordinates) <$> traverse promote (Map.elems m)
+      where
+        promote (PendingWorkspace (Just n) (Just c) (Just s)) = Just (Workspace n c s)
+        promote _ = Nothing

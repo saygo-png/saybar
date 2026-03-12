@@ -1,4 +1,4 @@
-module Bar (swizzleRGBAtoBGRA, getBarState, renderBarState, workspaceEventsHandler) where
+module Bar (swizzleRGBAtoBGRA, workspaceEventsHandler, renderBar) where
 
 import Codec.Picture (PixelRGBA8 (..), imageData)
 import Codec.Picture.Types (Image)
@@ -6,14 +6,12 @@ import Config
 import Data.Bits
 import Data.ByteString.Lazy qualified as BSL
 import Data.Map qualified as Map
-import Data.Text qualified as T
 import Data.Vector.Storable qualified as VS
 import Graphics.Rasterific
-import Graphics.Rasterific.Texture
-import Graphics.Text.TrueType (Font)
+import Graphics.Rasterific.Transformations
+import Modules
 import Relude hiding (ByteString, get, isPrefixOf, put)
 import Saywayland
-import System.Process.Typed
 import Types
 
 swizzleRGBAtoBGRA :: Image PixelRGBA8 -> BSL.ByteString
@@ -63,50 +61,30 @@ workspaceEventsHandler workspaces = \case
     Map.delete h.objectID workspaces
   _ -> workspaces
 
-{- | Attempt to promote all pending workspaces to fully resolved ones.
-Returns Nothing if any workspace is still missing fields.
-Workspaces are sorted by coordinates so rendering order is stable.
+{- | Run every module left-to-right, compose their drawings, rasterize.
+  Each module's render function returns the pixel width it consumed,
+  which advances the cursor for the next module.
 -}
-resolveWorkspaces :: WorkspaceMap -> Maybe [Workspace]
-resolveWorkspaces m =
-  sortOn (.wsCoordinates) <$> traverse promote (Map.elems m)
-  where
-    promote (PendingWorkspace (Just n) (Just c) (Just s)) =
-      Just (Workspace n c s)
-    promote _ = Nothing
-
-getBarState :: WorkspaceMap -> BarState -> IO (Maybe BarState)
-getBarState workspaceMap prevState =
-  case resolveWorkspaces workspaceMap of
-    Nothing -> pure Nothing
-    Just ws -> do
-      date <- getDate
-      let newState = BarState date ws
-      pure $ if newState == prevState then Nothing else Just newState
-  where
-    getDate :: IO Text
-    getDate = do
-      (dateOut, _dateErr) <-
-        readProcess_
-          $ setEnv [("LC_ALL", "C")]
-          $ proc "date" ["+%a %Y-%m(%B)-%d %H:%M"]
-      pure . decodeUtf8 . BSL.reverse . BSL.drop 1 $ BSL.reverse dateOut
-
-renderBarState :: Font -> BarState -> Image PixelRGBA8
-renderBarState font barState = do
+renderBar :: RenderCtx -> [BarModule] -> IO (Image PixelRGBA8)
+renderBar ctx modules = do
+  let margin :: Float = 0
   let bgColor = PixelRGBA8 0 0 0 0
-      drawColor = PixelRGBA8 213 196 161 255 -- #d5c4a1
-      workspaceNames =
-        T.intercalate " "
-          $ mapMaybe
-            ( \w -> case w.wsState of
-                Hidden -> Nothing
-                Active -> Just $ "[" <> w.wsName <> "]"
-                _ -> Just w.wsName
-            )
-            barState.workspaces
+  drawings <- mapM (runModule ctx) modules
+  let drawing = composeDrawings drawings
+  pure $ renderDrawing (fromIntegral bufferWidth) (fromIntegral bufferHeight) bgColor drawing
+  where
+    gapBetweenModules :: Float = 0
 
-  renderDrawing (fromIntegral bufferWidth) (fromIntegral bufferHeight) bgColor $ do
-    withTexture (uniformTexture drawColor) $ do
-      let text = mconcat [barState.date, " | ", workspaceNames]
-      printTextAt font (PointSize 11) (V2 20 15) $ toString text
+    -- At what height to render at>
+    baseline :: Float = fromIntegral bufferHeight * 0.75
+
+    composeDrawings :: [(RenderResult, Float)] -> RenderResult
+    composeDrawings = go 0
+      where
+        go :: Float -> [(RenderResult, Float)] -> RenderResult
+        go _ [] = mempty
+        go margin ((drawing, width) : rest) = do
+          let otherDrawings = go (margin + width) rest
+          let transformedDrawing = do
+                withTransformation (translate (V2 margin baseline)) drawing
+          mconcat [transformedDrawing, otherDrawings]

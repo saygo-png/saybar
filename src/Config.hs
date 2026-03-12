@@ -1,7 +1,9 @@
-module Config (colorChannels, bufferWidth, bufferHeight, poolName, colorFormat) where
+module Config (colorChannels, bufferWidth, bufferHeight, poolName, colorFormat, makeModules) where
 
-import Saywayland
+import Modules
 import Relude
+import Saywayland
+import Types
 
 bufferWidth :: WlInt
 bufferWidth = 1920
@@ -17,3 +19,13 @@ colorFormat = 0 -- ARGB8888
 
 colorChannels :: WlInt
 colorChannels = 4
+
+{- | Build the ordered list of bar modules.
+  Called once from Main after the workspace TVar is created.
+  Add, remove, or reorder modules here.
+-}
+makeModules :: TVar [Workspace] -> [BarModule]
+makeModules wsVar =
+  [ workspaceModule wsVar
+  , dateModule
+  ]
