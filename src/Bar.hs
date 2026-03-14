@@ -76,7 +76,6 @@ workspaceEventsHandler workspaces = \case
 -}
 renderBar :: RenderCtx -> [Either Spacer BarModule] -> IO (Image PixelRGBA8)
 renderBar ctx modules = do
-  let margin :: Float = 0
   let bgColor = PixelRGBA8 0 0 0 0
   drawings <- mapM (runModule ctx) modules
   let drawing = composeDrawings drawings
@@ -102,4 +101,4 @@ renderBar ctx modules = do
           let transformedDrawing = do
                 withTransformation (translate (V2 margin baseline)) drawing
           mconcat [transformedDrawing, otherDrawings]
-        go margin ((Left Spacer) : rest) = go (margin + spacerWidth) rest
+        go margin ((Left Spacer) : rest) = go (margin + gapBetweenModules + spacerWidth) rest

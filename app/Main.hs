@@ -6,7 +6,7 @@ import Bar
 import Codec.Picture (PixelRGBA8 (..))
 import Codec.Picture.Types (Image)
 import Config
-import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent (forkIO)
 import Control.Exception
 import Data.Map qualified as Map
 import GHC.IO.Handle
@@ -84,7 +84,8 @@ program = do
   wlSurface_commit wlSurfaceID
   zwlrLayerSurfaceV1_ackConfigure layerSurfaceID =<< atomically (takeTMVar serial)
 
-  font <- either (error . toText) pure =<< liftIO (loadFontFile "CourierPrime-Regular.ttf")
+  let fontPath :: FilePath = "/home/samsepi0l/builds/extrasNixos/courier-prime-no-ligatures/CourierPrime-Regular.ttf"
+  font <- either (error . toText) pure =<< liftIO (loadFontFile fontPath)
 
   let ctx =
         RenderCtx
@@ -134,7 +135,6 @@ program = do
       wlSurface_damageBuffer wlSurfaceID 0 0 bufferWidth bufferHeight
       wlSurface_attach wlSurfaceID buffer.id
       wlSurface_commit wlSurfaceID
-      liftIO $ threadDelay 100000
       putMVar freeBuffer ()
 
     -- \| Promote a WorkspaceMap to a clean sorted [Workspace].

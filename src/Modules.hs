@@ -72,7 +72,7 @@ renderDate ctx t =
 dateModule :: BarModule
 dateModule =
   BarModule
-    { trigger = OnTimer 1000
+    { trigger = OnTimer 60000
     , getData = getDate
     , render = renderDate
     }

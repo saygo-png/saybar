@@ -63,35 +63,17 @@ common common-options
     TypeSynonymInstances
     ViewPatterns
 
-library saywayland
-  import:          common-options
-  build-depends:
-    , ansi-terminal
-    , binary
-    , bytestring
-    , containers
-    , network
-    , template-haskell
-
-  hs-source-dirs:  lib
-  exposed-modules: Saywayland, SaywaylandTH
-
--- Internal library so that `src/` belongs to exactly one component.
--- Both the executable and the benchmark depend on this; HLS can then
--- unambiguously resolve every file under src/.
+-- Internal library so that `src/` belongs to exactly one component which fixes issues with hls.
 library saybar-internal
   import:          common-options
   hs-source-dirs:  src
   build-depends:
-    , binary
     , bytestring
     , containers
     , FontyFruity
     , JuicyPixels
     , Rasterific
     , saywayland
-    , stm
-    , typed-process
     , vector
     , time
   exposed-modules:
@@ -108,19 +90,12 @@ executable saybar
   build-depends:
     , network
     , saybar-internal
-    , time
     , unix
-    , binary
     , bytestring
     , containers
     , FontyFruity
     , JuicyPixels
-    , Rasterific
     , saywayland
-    , stm
-    , typed-process
-    , vector
-
 
 benchmark saybar-bench
   import:         common-options
