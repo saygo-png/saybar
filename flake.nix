@@ -15,27 +15,29 @@
       url = "path:./systems.nix";
       flake = false;
     };
+    hs-bindgen.url = "github:well-typed/hs-bindgen";
   };
 
   outputs = {
     nixpkgs,
     systems,
     niceHaskell,
+    hs-bindgen,
     treefmt-nix,
-    self,
     ...
   }: let
-    pkgsFor = nixpkgs.lib.genAttrs (import systems) (system: import nixpkgs {inherit system;});
+    pkgsFor = nixpkgs.lib.genAttrs (import systems) (system:
+      import nixpkgs {
+        inherit system;
+        overlays = [hs-bindgen.overlays.default];
+      });
     eachSystem = f: nixpkgs.lib.genAttrs (import systems) (system: f system pkgsFor.${system});
-  in {
-    homeManagerModules.default = self.homeManagerModules.drugtracker2;
-    homeManagerModules.drugtracker2 = (import ./home-manager.nix) niceHaskell;
 
-    packages = eachSystem (system: pkgs: let
-      program = pkgs.callPackage ./package.nix {niceHaskell = niceHaskell.outputs.niceHaskell.${system};};
-    in {
-      "saybar" = program;
-      default = program;
+    program = system: pkgs: pkgs.callPackage ./package.nix {niceHaskell = niceHaskell.outputs.niceHaskell.${system};};
+  in {
+    packages = eachSystem (system: pkgs: {
+      "saybar" = program system pkgs;
+      default = program system pkgs;
     });
 
     formatter = eachSystem (system: pkgs: (treefmt-nix.lib.evalModule pkgs ./treefmt.nix).${system}.config.build.wrapper);
@@ -49,9 +51,33 @@
           ghcPackages.cabal-install
           ghcPackages.ghc
           ghcPackages.haskell-language-server
+
+          # `hs-bindgen` client.
+          pkgs.hs-bindgen-cli
+
+          # Connect `hs-bindgen` to the Clang toolchain and `libpcap`.
+          pkgs.hsBindgenHook
+          ghcPackages.c-expr-runtime
+          ghcPackages.hs-bindgen-runtime
+
+          # Dependencies for fcft
+          pkgs.pkg-config
+          pkgs.freetype
+          pkgs.fontconfig
+          pkgs.nanosvg
+          pkgs.pixman
+          pkgs.tllist
+          pkgs.expat
+          pkgs.harfbuzz
+          pkgs.glib
+          pkgs.libsysprof-capture
+          pkgs.pcre2
+          pkgs.libutf8proc
+          pkgs.fcft
         ];
         shellHook = ''
           export CABAL_DIR="$XDG_CONFIG_HOME/cabal"
+          export LD_LIBRARY_PATH="$PWD/fcft/lib:$LD_LIBRARY_PATH"
         '';
       };
     });

@@ -64,9 +64,33 @@ common common-options
     ViewPatterns
 
 -- Internal library so that `src/` belongs to exactly one component which fixes issues with hls.
+
+library fcft-bindings
+  hs-source-dirs: bindings
+  ghc-options: -threaded
+  pkgconfig-depends: fcft
+  default-language:   GHC2021
+  build-depends:
+    , base    >=4.7 && <5
+    , bytestring
+    , containers
+    , FontyFruity
+    , JuicyPixels
+    , Rasterific
+    , saywayland
+    , vector
+    , time
+    , c-expr-runtime
+    , hs-bindgen-runtime
+
+  exposed-modules:
+    Generated.Fcft
+    Generated.Fcft.Safe
+
 library saybar-internal
   import:          common-options
   hs-source-dirs:  src
+  pkgconfig-depends: fcft
   build-depends:
     , bytestring
     , containers
@@ -76,6 +100,8 @@ library saybar-internal
     , saywayland
     , vector
     , time
+    , fcft-bindings
+
   exposed-modules:
     Bar
     Config
@@ -86,6 +112,7 @@ executable saybar
   import:         common-options
   ghc-options:    -rtsopts -with-rtsopts=-N
   hs-source-dirs: app
+  pkgconfig-depends: fcft
   main-is:        Main.hs
   build-depends:
     , network
@@ -96,6 +123,7 @@ executable saybar
     , FontyFruity
     , JuicyPixels
     , saywayland
+    , fcft-bindings
 
 benchmark saybar-bench
   import:         common-options

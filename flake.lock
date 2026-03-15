@@ -1,5 +1,60 @@
 {
   "nodes": {
+    "flake-parts": {
+      "inputs": {
+        "nixpkgs-lib": "nixpkgs-lib"
+      },
+      "locked": {
+        "lastModified": 1769996383,
+        "narHash": "sha256-AnYjnFWgS49RlqX7LrC4uA+sCCDBj0Ry/WOJ5XWAsa0=",
+        "owner": "hercules-ci",
+        "repo": "flake-parts",
+        "rev": "57928607ea566b5db3ad13af0e57e921e6b12381",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hercules-ci",
+        "repo": "flake-parts",
+        "type": "github"
+      }
+    },
+    "hs-bindgen": {
+      "inputs": {
+        "flake-parts": "flake-parts",
+        "libclang-bindings-src": "libclang-bindings-src",
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "lastModified": 1773399083,
+        "narHash": "sha256-oF6E1/zRZ4iiZs9QjtQMvHnLMfq/W6CXOX44QbDGYXs=",
+        "owner": "well-typed",
+        "repo": "hs-bindgen",
+        "rev": "6ca94188abd756a1fb4dd8a4037de3fa7dca0765",
+        "type": "github"
+      },
+      "original": {
+        "owner": "well-typed",
+        "repo": "hs-bindgen",
+        "type": "github"
+      }
+    },
+    "libclang-bindings-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1773221966,
+        "narHash": "sha256-VPG7jKdq2g/Hwf5cPiy4coAvLULxDeA4KHCVkNSSs5w=",
+        "owner": "well-typed",
+        "repo": "libclang",
+        "rev": "d6e482df49b88375cf3075928a78ee86c2a068d4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "well-typed",
+        "repo": "libclang",
+        "rev": "d6e482df49b88375cf3075928a78ee86c2a068d4",
+        "type": "github"
+      }
+    },
     "niceHaskell": {
       "inputs": {
         "nixpkgs": [
@@ -28,6 +83,37 @@
     },
     "nixpkgs": {
       "locked": {
+        "lastModified": 1771482645,
+        "narHash": "sha256-MpAKyXfJRDTgRU33Hja+G+3h9ywLAJJNRq4Pjbb4dQs=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "724cf38d99ba81fbb4a347081db93e2e3a9bc2ae",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs-lib": {
+      "locked": {
+        "lastModified": 1769909678,
+        "narHash": "sha256-cBEymOf4/o3FD5AZnzC3J9hLbiZ+QDT/KDuyHXVJOpM=",
+        "owner": "nix-community",
+        "repo": "nixpkgs.lib",
+        "rev": "72716169fe93074c333e8d0173151350670b824c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "nixpkgs.lib",
+        "type": "github"
+      }
+    },
+    "nixpkgs_2": {
+      "locked": {
         "lastModified": 1770015011,
         "narHash": "sha256-7vUo0qWCl/rip+fzr6lcMlz9I0tN/8m7d5Bla/rS2kk=",
         "owner": "NixOS",
@@ -42,7 +128,7 @@
         "type": "github"
       }
     },
-    "nixpkgs_2": {
+    "nixpkgs_3": {
       "locked": {
         "lastModified": 1767364772,
         "narHash": "sha256-fFUnEYMla8b7UKjijLnMe+oVFOz6HjijGGNS1l7dYaQ=",
@@ -60,8 +146,9 @@
     },
     "root": {
       "inputs": {
+        "hs-bindgen": "hs-bindgen",
         "niceHaskell": "niceHaskell",
-        "nixpkgs": "nixpkgs",
+        "nixpkgs": "nixpkgs_2",
         "systems": "systems",
         "treefmt-nix": "treefmt-nix"
       }
@@ -80,7 +167,7 @@
     },
     "treefmt-nix": {
       "inputs": {
-        "nixpkgs": "nixpkgs_2"
+        "nixpkgs": "nixpkgs_3"
       },
       "locked": {
         "lastModified": 1769691507,

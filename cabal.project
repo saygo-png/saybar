@@ -5,10 +5,22 @@ source-repository-package
   location: https://github.com/saygo-png/saywayland
   tag: ec29b5b0d42a54fdf8ce1f5d0abfcb666efe54ee
 
--- source-repository-package
---  type: git
---  location: https://github.com/well-typed/hs-bindgen
---  tag: 6ca94188abd756a1fb4dd8a4037de3fa7dca0765
+source-repository-package
+  type: git
+  location: https://github.com/well-typed/hs-bindgen
+  tag: 6ca94188abd756a1fb4dd8a4037de3fa7dca0765
+  subdir: c-expr-runtime
+
+source-repository-package
+  type: git
+  location: https://github.com/well-typed/hs-bindgen
+  tag: 6ca94188abd756a1fb4dd8a4037de3fa7dca0765
+  subdir: hs-bindgen-runtime
+
+extra-include-dirs:
+    ${pkgroot}/fcft/include/fcft
+extra-lib-dirs:
+    ${pkgroot}/fcft/lib
 
 benchmarks: True
 -- extra-packages: hs-bindgen
