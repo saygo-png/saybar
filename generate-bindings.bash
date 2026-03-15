@@ -22,6 +22,7 @@ module_flags=(
 # We only generate bindings for a sub-set of all parsed/reified declarations.
 # These flags configure the selection step.
 select_flags=(
+  --enable-program-slicing
   --select-except-deprecated
 )
 

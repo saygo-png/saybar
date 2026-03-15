@@ -11,6 +11,15 @@
         treefmt-nix.follows = "treefmt-nix";
       };
     };
+    saywayland = {
+      url = "github:saygo-png/saywayland/ec29b5b0d42a54fdf8ce1f5d0abfcb666efe54ee";
+      inputs = {
+        treefmt-nix.follows = "treefmt-nix";
+        nixpkgs.follows = "nixpkgs";
+        systems.follows = "systems";
+        niceHaskell.follows = "niceHaskell";
+      };
+    };
     systems = {
       url = "path:./systems.nix";
       flake = false;
@@ -21,6 +30,7 @@
   outputs = {
     nixpkgs,
     systems,
+    saywayland,
     niceHaskell,
     hs-bindgen,
     treefmt-nix,
@@ -33,7 +43,12 @@
       });
     eachSystem = f: nixpkgs.lib.genAttrs (import systems) (system: f system pkgsFor.${system});
 
-    program = system: pkgs: pkgs.callPackage ./package.nix {niceHaskell = niceHaskell.outputs.niceHaskell.${system};};
+    program = system: pkgs:
+      pkgs.callPackage ./package.nix {
+        niceHaskell = niceHaskell.outputs.niceHaskell.${system};
+        inherit (pkgs.haskell.packages.ghc912) c-expr-runtime hs-bindgen-runtime;
+        inherit (saywayland.packages.${system}) saywayland;
+      };
   in {
     packages = eachSystem (system: pkgs: {
       "saybar" = program system pkgs;

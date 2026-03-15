@@ -4,7 +4,6 @@ import Bar (renderBar, writeSwizzledRGBAtoBGRA)
 import Codec.Picture.Types
 import Config (bufferHeight, bufferWidth, makeModules)
 import Criterion.Main
-import Graphics.Text.TrueType (PointSize (..), loadFontFile)
 import Modules (RenderCtx (..), renderDate, renderWorkspaces)
 import Relude
 import System.IO (openFile)

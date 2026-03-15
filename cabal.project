@@ -17,10 +17,4 @@ source-repository-package
   tag: 6ca94188abd756a1fb4dd8a4037de3fa7dca0765
   subdir: hs-bindgen-runtime
 
-extra-include-dirs:
-    ${pkgroot}/fcft/include/fcft
-extra-lib-dirs:
-    ${pkgroot}/fcft/lib
-
 benchmarks: True
--- extra-packages: hs-bindgen

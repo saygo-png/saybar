@@ -8,8 +8,12 @@ module Generated.Fcft.FunPtr
     , Generated.Fcft.FunPtr.fcft_capabilities
     , Generated.Fcft.FunPtr.fcft_clone
     , Generated.Fcft.FunPtr.fcft_destroy
+    , Generated.Fcft.FunPtr.fcft_rasterize_char_utf32
+    , Generated.Fcft.FunPtr.fcft_text_run_destroy
     , Generated.Fcft.FunPtr.fcft_kerning
     , Generated.Fcft.FunPtr.fcft_precompose
+    , Generated.Fcft.FunPtr.fcft_font_options_create
+    , Generated.Fcft.FunPtr.fcft_font_options_destroy
     )
   where
 
@@ -59,6 +63,24 @@ $(HsBindgen.Runtime.Internal.CAPI.addCSource (HsBindgen.Runtime.Internal.CAPI.un
   , "{"
   , "  return &fcft_destroy;"
   , "}"
+  , "/* saygo_bindings_fcft_Generated.Fcft_get_fcft_rasterize_char_utf32 */"
+  , "__attribute__ ((const))"
+  , "struct fcft_glyph const *(*hs_bindgen_489ed2a2baeceffe (void)) ("
+  , "  struct fcft_font *arg1,"
+  , "  uint32_t arg2,"
+  , "  enum fcft_subpixel arg3"
+  , ")"
+  , "{"
+  , "  return &fcft_rasterize_char_utf32;"
+  , "}"
+  , "/* saygo_bindings_fcft_Generated.Fcft_get_fcft_text_run_destroy */"
+  , "__attribute__ ((const))"
+  , "void (*hs_bindgen_05ef6b71f9929561 (void)) ("
+  , "  struct fcft_text_run *arg1"
+  , ")"
+  , "{"
+  , "  return &fcft_text_run_destroy;"
+  , "}"
   , "/* saygo_bindings_fcft_Generated.Fcft_get_fcft_kerning */"
   , "__attribute__ ((const))"
   , "bool (*hs_bindgen_ad6a0fffa0acf165 (void)) ("
@@ -83,6 +105,20 @@ $(HsBindgen.Runtime.Internal.CAPI.addCSource (HsBindgen.Runtime.Internal.CAPI.un
   , ")"
   , "{"
   , "  return &fcft_precompose;"
+  , "}"
+  , "/* saygo_bindings_fcft_Generated.Fcft_get_fcft_font_options_create */"
+  , "__attribute__ ((const))"
+  , "struct fcft_font_options *(*hs_bindgen_1771aa3a08508c4a (void)) (void)"
+  , "{"
+  , "  return &fcft_font_options_create;"
+  , "}"
+  , "/* saygo_bindings_fcft_Generated.Fcft_get_fcft_font_options_destroy */"
+  , "__attribute__ ((const))"
+  , "void (*hs_bindgen_77e951988e97326f (void)) ("
+  , "  struct fcft_font_options *arg1"
+  , ")"
+  , "{"
+  , "  return &fcft_font_options_destroy;"
   , "}"
   ]))
 
@@ -186,6 +222,46 @@ fcft_destroy :: RIP.FunPtr ((RIP.Ptr Fcft_font) -> IO ())
 fcft_destroy =
   RIP.unsafePerformIO hs_bindgen_854f9510b252c808
 
+-- __unique:__ @saygo_bindings_fcft_Generated.Fcft_get_fcft_rasterize_char_utf32@
+foreign import ccall unsafe "hs_bindgen_489ed2a2baeceffe" hs_bindgen_489ed2a2baeceffe_base ::
+     IO (RIP.FunPtr RIP.Void)
+
+-- __unique:__ @saygo_bindings_fcft_Generated.Fcft_get_fcft_rasterize_char_utf32@
+hs_bindgen_489ed2a2baeceffe :: IO (RIP.FunPtr ((RIP.Ptr Fcft_font) -> HsBindgen.Runtime.LibC.Word32 -> Fcft_subpixel -> IO (PtrConst.PtrConst Fcft_glyph)))
+hs_bindgen_489ed2a2baeceffe =
+  RIP.fromFFIType hs_bindgen_489ed2a2baeceffe_base
+
+{-# NOINLINE fcft_rasterize_char_utf32 #-}
+{-| __C declaration:__ @fcft_rasterize_char_utf32@
+
+    __defined at:__ @\/nix\/store\/gvh74ry77q456n8i1sdd8d3s9zqv8wm7-fcft-3.3.3\/include\/fcft\/fcft.h 124:26@
+
+    __exported by:__ @\/nix\/store\/gvh74ry77q456n8i1sdd8d3s9zqv8wm7-fcft-3.3.3\/include\/fcft\/fcft.h@
+-}
+fcft_rasterize_char_utf32 :: RIP.FunPtr ((RIP.Ptr Fcft_font) -> HsBindgen.Runtime.LibC.Word32 -> Fcft_subpixel -> IO (PtrConst.PtrConst Fcft_glyph))
+fcft_rasterize_char_utf32 =
+  RIP.unsafePerformIO hs_bindgen_489ed2a2baeceffe
+
+-- __unique:__ @saygo_bindings_fcft_Generated.Fcft_get_fcft_text_run_destroy@
+foreign import ccall unsafe "hs_bindgen_05ef6b71f9929561" hs_bindgen_05ef6b71f9929561_base ::
+     IO (RIP.FunPtr RIP.Void)
+
+-- __unique:__ @saygo_bindings_fcft_Generated.Fcft_get_fcft_text_run_destroy@
+hs_bindgen_05ef6b71f9929561 :: IO (RIP.FunPtr ((RIP.Ptr Fcft_text_run) -> IO ()))
+hs_bindgen_05ef6b71f9929561 =
+  RIP.fromFFIType hs_bindgen_05ef6b71f9929561_base
+
+{-# NOINLINE fcft_text_run_destroy #-}
+{-| __C declaration:__ @fcft_text_run_destroy@
+
+    __defined at:__ @\/nix\/store\/gvh74ry77q456n8i1sdd8d3s9zqv8wm7-fcft-3.3.3\/include\/fcft\/fcft.h 149:6@
+
+    __exported by:__ @\/nix\/store\/gvh74ry77q456n8i1sdd8d3s9zqv8wm7-fcft-3.3.3\/include\/fcft\/fcft.h@
+-}
+fcft_text_run_destroy :: RIP.FunPtr ((RIP.Ptr Fcft_text_run) -> IO ())
+fcft_text_run_destroy =
+  RIP.unsafePerformIO hs_bindgen_05ef6b71f9929561
+
 -- __unique:__ @saygo_bindings_fcft_Generated.Fcft_get_fcft_kerning@
 foreign import ccall unsafe "hs_bindgen_ad6a0fffa0acf165" hs_bindgen_ad6a0fffa0acf165_base ::
      IO (RIP.FunPtr RIP.Void)
@@ -225,3 +301,43 @@ hs_bindgen_3fb59af06d62e5b3 =
 fcft_precompose :: RIP.FunPtr ((PtrConst.PtrConst Fcft_font) -> HsBindgen.Runtime.LibC.Word32 -> HsBindgen.Runtime.LibC.Word32 -> (RIP.Ptr HsBindgen.Runtime.LibC.CBool) -> (RIP.Ptr HsBindgen.Runtime.LibC.CBool) -> (RIP.Ptr HsBindgen.Runtime.LibC.CBool) -> IO HsBindgen.Runtime.LibC.Word32)
 fcft_precompose =
   RIP.unsafePerformIO hs_bindgen_3fb59af06d62e5b3
+
+-- __unique:__ @saygo_bindings_fcft_Generated.Fcft_get_fcft_font_options_create@
+foreign import ccall unsafe "hs_bindgen_1771aa3a08508c4a" hs_bindgen_1771aa3a08508c4a_base ::
+     IO (RIP.FunPtr RIP.Void)
+
+-- __unique:__ @saygo_bindings_fcft_Generated.Fcft_get_fcft_font_options_create@
+hs_bindgen_1771aa3a08508c4a :: IO (RIP.FunPtr (IO (RIP.Ptr Fcft_font_options)))
+hs_bindgen_1771aa3a08508c4a =
+  RIP.fromFFIType hs_bindgen_1771aa3a08508c4a_base
+
+{-# NOINLINE fcft_font_options_create #-}
+{-| __C declaration:__ @fcft_font_options_create@
+
+    __defined at:__ @\/nix\/store\/gvh74ry77q456n8i1sdd8d3s9zqv8wm7-fcft-3.3.3\/include\/fcft\/fcft.h 234:27@
+
+    __exported by:__ @\/nix\/store\/gvh74ry77q456n8i1sdd8d3s9zqv8wm7-fcft-3.3.3\/include\/fcft\/fcft.h@
+-}
+fcft_font_options_create :: RIP.FunPtr (IO (RIP.Ptr Fcft_font_options))
+fcft_font_options_create =
+  RIP.unsafePerformIO hs_bindgen_1771aa3a08508c4a
+
+-- __unique:__ @saygo_bindings_fcft_Generated.Fcft_get_fcft_font_options_destroy@
+foreign import ccall unsafe "hs_bindgen_77e951988e97326f" hs_bindgen_77e951988e97326f_base ::
+     IO (RIP.FunPtr RIP.Void)
+
+-- __unique:__ @saygo_bindings_fcft_Generated.Fcft_get_fcft_font_options_destroy@
+hs_bindgen_77e951988e97326f :: IO (RIP.FunPtr ((RIP.Ptr Fcft_font_options) -> IO ()))
+hs_bindgen_77e951988e97326f =
+  RIP.fromFFIType hs_bindgen_77e951988e97326f_base
+
+{-# NOINLINE fcft_font_options_destroy #-}
+{-| __C declaration:__ @fcft_font_options_destroy@
+
+    __defined at:__ @\/nix\/store\/gvh74ry77q456n8i1sdd8d3s9zqv8wm7-fcft-3.3.3\/include\/fcft\/fcft.h 235:6@
+
+    __exported by:__ @\/nix\/store\/gvh74ry77q456n8i1sdd8d3s9zqv8wm7-fcft-3.3.3\/include\/fcft\/fcft.h@
+-}
+fcft_font_options_destroy :: RIP.FunPtr ((RIP.Ptr Fcft_font_options) -> IO ())
+fcft_font_options_destroy =
+  RIP.unsafePerformIO hs_bindgen_77e951988e97326f

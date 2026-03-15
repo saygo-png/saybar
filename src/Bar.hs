@@ -1,19 +1,18 @@
 module Bar (writeSwizzledRGBAtoBGRA, workspaceEventsHandler, renderBar) where
 
-import Codec.Picture (PixelRGBA8 (..), imageData)
-import Codec.Picture.Types (Image)
+import Codec.Picture
 import Config
 import Data.Bits
 import Data.Map qualified as Map
 import Data.Vector.Storable qualified as VS
 import GHC.IO.Handle (hPutBuf)
-import Graphics.Rasterific
-import Graphics.Rasterific.Transformations
 import Modules
 import Relude hiding (ByteString, get, isPrefixOf, put)
+import RenderText
 import Saywayland
 import Types
 
+-- | Convert RGBA to BGRA (A format understood by Wayland)
 writeSwizzledRGBAtoBGRA :: Handle -> Image PixelRGBA8 -> IO ()
 writeSwizzledRGBAtoBGRA handle image =
   VS.unsafeWith swizzled $ \ptr ->
@@ -72,33 +71,39 @@ workspaceEventsHandler workspaces = \case
 
 {- | Run every module left-to-right, compose their drawings, rasterize.
   Each module's render function returns the pixel width it consumed,
-  which advances the cursor for the next module.
+  which is used to advance the pen for the next module.
 -}
 renderBar :: RenderCtx -> [Either Spacer BarModule] -> IO (Image PixelRGBA8)
 renderBar ctx modules = do
-  let bgColor = PixelRGBA8 0 0 0 0
   drawings <- mapM (runModule ctx) modules
-  let drawing = composeDrawings drawings
-  pure $ renderDrawing (fromIntegral bufferWidth) (fromIntegral bufferHeight) bgColor drawing
+  let finalGlyphs = map (translateGlyph 0 (-13)) $ composeDrawings drawings
+  -- Use the pre-defined buffer dimensions to create the final image.
+  pure $ generateCanvas (fromIntegral bufferWidth) (fromIntegral bufferHeight) finalGlyphs
   where
     gapBetweenModules :: Float = 0
-
-    -- At what height to render at>
     baseline :: Float = fromIntegral bufferHeight * 0.75
 
     composeDrawings :: [Either Spacer (RenderResult, Float)] -> RenderResult
     composeDrawings barElements = go 0 barElements
       where
-        spacerWidth = (bufferWidthF - elementsWidth) / spacerCount
-          where
-            elementsWidth = sum $ snd <$> rights barElements
-            bufferWidthF :: Float = fromIntegral bufferWidth
-            spacerCount = fromIntegral . length $ lefts barElements
+        bufferWidthF :: Float = fromIntegral bufferWidth
+        elementsWidth = sum $ snd <$> rights barElements
+        spacerCount = fromIntegral . length $ lefts barElements
+        -- Avoid division by zero if there are no spacers
+        spacerWidth =
+          if spacerCount > 0
+            then (bufferWidthF - elementsWidth) / spacerCount
+            else 0
+
         go :: Float -> [Either Spacer (RenderResult, Float)] -> RenderResult
-        go _ [] = mempty
-        go margin ((Right (drawing, width)) : rest) = do
-          let otherDrawings = go (margin + width) rest
-          let transformedDrawing = do
-                withTransformation (translate (V2 margin baseline)) drawing
-          mconcat [transformedDrawing, otherDrawings]
-        go margin ((Left Spacer) : rest) = go (margin + gapBetweenModules + spacerWidth) rest
+        go _ [] = []
+        go margin (Right (glyphs, width) : rest) =
+          let
+            -- Shift these glyphs to the current margin and baseline
+            positioned = map (translateGlyph margin baseline) glyphs
+            -- Continue with the rest
+            others = go (margin + width) rest
+           in
+            positioned ++ others
+        go margin (Left Spacer : rest) =
+          go (margin + gapBetweenModules + spacerWidth) rest

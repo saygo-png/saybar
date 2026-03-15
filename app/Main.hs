@@ -9,8 +9,12 @@ import Config
 import Control.Concurrent (forkIO)
 import Control.Exception
 import Data.Map qualified as Map
+import Foreign (nullPtr)
+import Foreign.C
 import GHC.IO.Handle
-import Graphics.Text.TrueType (PointSize (PointSize), loadFontFile)
+import Generated.Fcft
+import Generated.Fcft.Safe
+import Manual.Fcft
 import Modules
 import Network.Socket
 import Relude hiding (ByteString, get, isPrefixOf, put)
@@ -19,6 +23,13 @@ import System.Posix (ownerReadMode, ownerWriteMode, setFdSize, unionFileModes)
 import System.Posix.IO
 import System.Posix.SharedMem
 import Types
+
+cFalse, cTrue :: CBool
+cFalse = CBool 0
+cTrue = CBool 1
+
+showCBool :: CBool -> Text
+showCBool = show . (/=) 0
 
 main :: IO ()
 main = do
@@ -84,14 +95,13 @@ program = do
   wlSurface_commit wlSurfaceID
   zwlrLayerSurfaceV1_ackConfigure layerSurfaceID =<< atomically (takeTMVar serial)
 
-  let fontPath :: FilePath = "/home/samsepi0l/builds/extrasNixos/courier-prime-no-ligatures/CourierPrime-Regular.ttf"
-  font <- either (error . toText) pure =<< liftIO (loadFontFile fontPath)
+  _ <- liftIO $ fcft_init FCFT_LOG_COLORIZE_AUTO cFalse FCFT_LOG_CLASS_DEBUG
+  font <- liftIO $ fcft_from_name2 ["monospace:size=14"] Nothing nullPtr
 
   let ctx =
         RenderCtx
           { font = font
-          , fontSize = PointSize 11
-          , dpi = 96
+          , fontSize = 11
           , drawColor = PixelRGBA8 213 196 161 255 -- #d5c4a1
           }
 
@@ -111,9 +121,12 @@ program = do
           let renderLoop :: (Buffer, Buffer) -> Wayland ()
               renderLoop buffers = do
                 atomically $ takeTMVar wakeUp
+                -- glyphs <- liftIO $ getGlyphs font "[t] b m 4 5"
+                -- renderedGlyphs <- liftIO $ renderGlyphs font glyphs (PixelRGBA8 213 196 161 255) 0 (2)
+                -- let image = generateCanvas (fromIntegral bufferWidth) (fromIntegral bufferHeight) $ fst renderedGlyphs
                 image <- liftIO $ renderBar ctx modules
                 putImage wlSurfaceID fileHandle image (fst buffers) freeBuffer
-                putTextLn $ "rerender!!!"
+                putTextLn "rerender!!!"
                 renderLoop (swap buffers)
 
           renderLoop (bufferA, bufferB)

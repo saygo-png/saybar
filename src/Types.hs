@@ -3,8 +3,7 @@
 
 module Types where
 
-import Codec.Picture (PixelRGBA8)
-import Graphics.Rasterific (Drawing)
+import Codec.Picture (Image, PixelRGBA8)
 import Relude
 import Saywayland
 
@@ -39,4 +38,10 @@ data BarState = BarState
   deriving stock (Show, Eq, Generic)
   deriving anyclass (NFData)
 
-type RenderResult = Drawing PixelRGBA8 ()
+type RenderResult = [RenderedGlyph]
+
+data RenderedGlyph = RenderedGlyph
+  { rgImage :: !(Image PixelRGBA8)
+  , rgX :: !Int -- top-left x in pen-coordinate space
+  , rgY :: !Int -- top-left y in pen-coordinate space
+  }

@@ -66,64 +66,63 @@ common common-options
 -- Internal library so that `src/` belongs to exactly one component which fixes issues with hls.
 
 library fcft-bindings
-  hs-source-dirs: bindings
-  ghc-options: -threaded
+  hs-source-dirs:    bindings
+  ghc-options:       -threaded
   pkgconfig-depends: fcft
-  default-language:   GHC2021
+  default-language:  GHC2021
   build-depends:
-    , base    >=4.7 && <5
+    , base                >=4.7 && <5
     , bytestring
-    , containers
-    , FontyFruity
-    , JuicyPixels
-    , Rasterific
-    , saywayland
-    , vector
-    , time
     , c-expr-runtime
+    , containers
     , hs-bindgen-runtime
+    , JuicyPixels
+    , saywayland
+    , time
+    , vector
 
   exposed-modules:
     Generated.Fcft
+    Generated.Fcft.FunPtr
     Generated.Fcft.Safe
+    Manual.Fcft
 
 library saybar-internal
-  import:          common-options
-  hs-source-dirs:  src
-  pkgconfig-depends: fcft
+  import:            common-options
+  hs-source-dirs:    src
+  pkgconfig-depends: fcft, pixman-1
   build-depends:
     , bytestring
     , containers
-    , FontyFruity
-    , JuicyPixels
-    , Rasterific
-    , saywayland
-    , vector
-    , time
     , fcft-bindings
+    , hs-bindgen-runtime
+    , JuicyPixels
+    , saywayland
+    , time
+    , vector
 
   exposed-modules:
     Bar
     Config
     Modules
+    RenderText
     Types
 
 executable saybar
-  import:         common-options
-  ghc-options:    -rtsopts -with-rtsopts=-N
-  hs-source-dirs: app
+  import:            common-options
+  ghc-options:       -rtsopts -with-rtsopts=-N
+  hs-source-dirs:    app
   pkgconfig-depends: fcft
-  main-is:        Main.hs
+  main-is:           Main.hs
   build-depends:
-    , network
-    , saybar-internal
-    , unix
     , bytestring
     , containers
-    , FontyFruity
-    , JuicyPixels
-    , saywayland
     , fcft-bindings
+    , JuicyPixels
+    , network
+    , saybar-internal
+    , saywayland
+    , unix
 
 benchmark saybar-bench
   import:         common-options
@@ -134,4 +133,3 @@ benchmark saybar-bench
     , criterion
     , JuicyPixels
     , saybar-internal
-    , FontyFruity
