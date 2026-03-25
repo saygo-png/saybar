@@ -40,7 +40,7 @@
       default = program system pkgs;
     });
 
-    formatter = eachSystem (system: pkgs: (treefmt-nix.lib.evalModule pkgs ./treefmt.nix).${system}.config.build.wrapper);
+    formatter = eachSystem (_system: pkgs: (treefmt-nix.lib.evalModule pkgs ./treefmt.nix).config.build.wrapper);
 
     devShells = eachSystem (_system: pkgs: {
       default = pkgs.mkShell {
@@ -76,7 +76,6 @@
           pkgs.fcft
         ];
         shellHook = ''
-          export CABAL_DIR="$XDG_CONFIG_HOME/cabal"
           export LD_LIBRARY_PATH="$PWD/fcft/lib:$LD_LIBRARY_PATH"
         '';
       };

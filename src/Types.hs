@@ -1,12 +1,12 @@
-{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module Types where
 
+import Codec.Picture (PixelRGBA8)
+import Graphics.Rasterific (Drawing)
 import Relude
 import Saywayland
-import Graphics.Rasterific (Drawing)
-import Codec.Picture (PixelRGBA8)
 
 data WorkspaceState = Active | Urgent | Hidden | Inactive
   deriving stock (Show, Eq, Ord, Generic)
