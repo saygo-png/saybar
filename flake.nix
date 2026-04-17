@@ -46,6 +46,7 @@
     program = system: pkgs:
       pkgs.callPackage ./package.nix {
         niceHaskell = niceHaskell.outputs.niceHaskell.${system};
+        # Provide dependencies for nix based builds
         inherit (pkgs.haskell.packages.ghc912) c-expr-runtime hs-bindgen-runtime;
         inherit (saywayland.packages.${system}) saywayland;
       };
@@ -57,23 +58,26 @@
 
     formatter = eachSystem (_system: pkgs: (treefmt-nix.lib.evalModule pkgs ./treefmt.nix).config.build.wrapper);
 
-    devShells = eachSystem (_system: pkgs: {
+    devShells = eachSystem (system: pkgs: {
       default = pkgs.mkShell {
         packages = let
           ghcPackages = pkgs.haskell.packages.ghc912;
+          # Provide dependencies for cabal based builds
+          ghcWithDeps = ghcPackages.ghcWithPackages (_ps: [
+            saywayland.packages.${system}.saywayland
+            ghcPackages.c-expr-runtime
+            ghcPackages.hs-bindgen-runtime
+          ]);
         in [
           pkgs.zlib
           ghcPackages.cabal-install
-          ghcPackages.ghc
+          ghcWithDeps
           ghcPackages.haskell-language-server
 
-          # `hs-bindgen` client.
+          # hs-bindgen cli
           pkgs.hs-bindgen-cli
-
-          # Connect `hs-bindgen` to the Clang toolchain and `libpcap`.
+          # Connect hs-bindgen to the Clang toolchain and `libpcap`
           pkgs.hsBindgenHook
-          ghcPackages.c-expr-runtime
-          ghcPackages.hs-bindgen-runtime
 
           # Dependencies for fcft
           pkgs.pkg-config
