@@ -19,6 +19,7 @@ import Modules
 import Network.Socket
 import Relude hiding (ByteString, get, isPrefixOf, put)
 import Saywayland
+import Saywayland.Types
 import System.Posix (ownerReadMode, ownerWriteMode, setFdSize, unionFileModes)
 import System.Posix.IO
 import System.Posix.SharedMem
@@ -31,6 +32,9 @@ cTrue = CBool 1
 showCBool :: CBool -> Text
 showCBool = show . (/=) 0
 
+fi :: forall a b. (Integral a, Num b) => a -> b
+fi = fromIntegral
+
 main :: IO ()
 main = do
   runReaderT program =<< waylandSetup
@@ -42,7 +46,7 @@ main = do
       globals <- newIORef mempty
       objects <- newIORef mempty
       handlers <- newIORef mempty
-      pure $ WaylandEnv sock counter globals objects handlers
+      pure $ ClientEnv sock counter globals objects handlers
 
 program :: Wayland ()
 program = do
@@ -90,8 +94,8 @@ program = do
   wlSurfaceID <- wlCompositor_createSurface wlCompositorID
   layerSurfaceID <- zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID 2 "saybar"
   zwlrLayerSurfaceV1_setAnchor layerSurfaceID 13 -- top left right anchors
-  zwlrLayerSurfaceV1_setSize layerSurfaceID 0 $ fromIntegral bufferHeight
-  zwlrLayerSurfaceV1_setExclusiveZone layerSurfaceID bufferHeight
+  zwlrLayerSurfaceV1_setSize layerSurfaceID 0 bufferHeight
+  zwlrLayerSurfaceV1_setExclusiveZone layerSurfaceID (fromIntegral bufferHeight)
   wlSurface_commit wlSurfaceID
   zwlrLayerSurfaceV1_ackConfigure layerSurfaceID =<< atomically (takeTMVar serial)
 
@@ -111,10 +115,10 @@ program = do
         flip runReaderT env $ do
           let frameSize = bufferWidth * bufferHeight * colorChannels
           let poolSize = 2 * frameSize -- 2x for double buffering
-          liftIO . setFdSize fileDescriptor $ fromIntegral poolSize
-          wlShmPoolID <- wlShm_createPool wlShmID fileDescriptor poolSize
-          bufferA <- wlShmPool_createBuffer wlShmPoolID 0 bufferWidth bufferHeight colorChannels Argb8888
-          bufferB <- wlShmPool_createBuffer wlShmPoolID frameSize bufferWidth bufferHeight colorChannels Argb8888
+          liftIO . setFdSize fileDescriptor $ fi poolSize
+          wlShmPoolID <- wlShm_createPool wlShmID fileDescriptor (fi poolSize)
+          bufferA <- wlShmPool_createBuffer wlShmPoolID 0 (fi bufferWidth) (fi bufferHeight) (fi colorChannels) Argb8888
+          bufferB <- wlShmPool_createBuffer wlShmPoolID (fi frameSize) (fi bufferWidth) (fi bufferHeight) (fi colorChannels) Argb8888
 
           fileHandle <- liftIO $ fdToHandle fileDescriptor
 
@@ -145,7 +149,7 @@ program = do
     putImage wlSurfaceID fileHandle image buffer freeBuffer = do
       liftIO . hSeek fileHandle AbsoluteSeek $ fromIntegral buffer.offset
       liftIO $ writeSwizzledRGBAtoBGRA fileHandle image
-      wlSurface_damageBuffer wlSurfaceID 0 0 bufferWidth bufferHeight
+      wlSurface_damageBuffer wlSurfaceID 0 0 (fi bufferWidth) (fi bufferHeight)
       wlSurface_attach wlSurfaceID buffer.id
       wlSurface_commit wlSurfaceID
       putMVar freeBuffer ()

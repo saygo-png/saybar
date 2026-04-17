@@ -12,6 +12,7 @@ import Relude hiding (ByteString, get, isPrefixOf, put)
 import RenderText (getGlyphs, renderGlyphs)
 import Saywayland
 import Types
+import Saywayland.Types
 
 -- | How a module decides when to refresh.
 data ModuleTrigger

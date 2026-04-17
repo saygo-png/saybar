@@ -12,7 +12,7 @@
       };
     };
     saywayland = {
-      url = "github:saygo-png/saywayland/ec29b5b0d42a54fdf8ce1f5d0abfcb666efe54ee";
+      url = "github:saygo-png/saywayland";
       inputs = {
         treefmt-nix.follows = "treefmt-nix";
         nixpkgs.follows = "nixpkgs";

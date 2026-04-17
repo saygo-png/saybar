@@ -170,17 +170,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1773149927,
-        "narHash": "sha256-7l8rP4UwaXBwhxq9t3APWc1WuSCgG2u7nJfxqHFpF5s=",
+        "lastModified": 1774097316,
+        "narHash": "sha256-ZHvNdDDVTOI9URyx3Lu19YfP5BvqYjCHqzfCFXUVus0=",
         "owner": "saygo-png",
         "repo": "saywayland",
-        "rev": "ec29b5b0d42a54fdf8ce1f5d0abfcb666efe54ee",
+        "rev": "bb41f7190a70196bc7084f0dee3de5a053c4303d",
         "type": "github"
       },
       "original": {
         "owner": "saygo-png",
         "repo": "saywayland",
-        "rev": "ec29b5b0d42a54fdf8ce1f5d0abfcb666efe54ee",
         "type": "github"
       }
     },

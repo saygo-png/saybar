@@ -11,6 +11,7 @@ import Relude hiding (ByteString, get, isPrefixOf, put)
 import RenderText
 import Saywayland
 import Types
+import Saywayland.Types
 
 -- | Convert RGBA to BGRA (A format understood by Wayland)
 writeSwizzledRGBAtoBGRA :: Handle -> Image PixelRGBA8 -> IO ()
