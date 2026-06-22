@@ -18,6 +18,7 @@ import Manual.Fcft
 import Modules
 import Network.Socket
 import Relude hiding (ByteString, get, isPrefixOf, put)
+import RenderText (getGlyphs, renderGlyphs)
 import Saywayland
 import Saywayland.Types
 import System.Posix (ownerReadMode, ownerWriteMode, setFdSize, unionFileModes)
@@ -102,10 +103,14 @@ program = do
   _ <- liftIO $ fcft_init FCFT_LOG_COLORIZE_AUTO cFalse FCFT_LOG_CLASS_DEBUG
   font <- liftIO $ fcft_from_name2 ["monospace:size=14"] Nothing nullPtr
 
+  textRun <- liftIO $ getGlyphs font " "
+  (_, gap) <- liftIO $ renderGlyphs font textRun (PixelRGBA8 0 0 0 0) 0 0
+
   let ctx =
         RenderCtx
           { font = font
           , fontSize = 11
+          , moduleGap = gap
           , drawColor = PixelRGBA8 213 196 161 255 -- #d5c4a1
           }
 

@@ -92,6 +92,7 @@ library saybar-internal
   hs-source-dirs:    src
   pkgconfig-depends: fcft, pixman-1
   build-depends:
+    , typed-process
     , bytestring
     , containers
     , fcft-bindings

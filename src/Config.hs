@@ -2,8 +2,8 @@ module Config (colorChannels, bufferWidth, bufferHeight, poolName, colorFormat, 
 
 import Modules
 import Relude
-import Types
 import Saywayland.Types
+import Types
 
 bufferWidth :: WlUint
 bufferWidth = 1920
@@ -28,5 +28,6 @@ makeModules :: TVar [Workspace] -> [Either Spacer BarModule]
 makeModules wsVar =
   [ Right $ workspaceModule wsVar
   , Left Spacer
+  , Right $ mkShellModule "free-space" 30000
   , Right dateModule
   ]

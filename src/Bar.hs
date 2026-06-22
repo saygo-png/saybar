@@ -10,8 +10,11 @@ import Modules
 import Relude hiding (ByteString, get, isPrefixOf, put)
 import RenderText
 import Saywayland
-import Types
 import Saywayland.Types
+import Types
+
+fi :: forall a b. (Integral a, Num b) => a -> b
+fi = fromIntegral
 
 -- | Convert RGBA to BGRA (A format understood by Wayland)
 writeSwizzledRGBAtoBGRA :: Handle -> Image PixelRGBA8 -> IO ()
@@ -78,23 +81,17 @@ renderBar :: RenderCtx -> [Either Spacer BarModule] -> IO (Image PixelRGBA8)
 renderBar ctx modules = do
   drawings <- mapM (runModule ctx) modules
   let finalGlyphs = map (translateGlyph 0 (-13)) $ composeDrawings drawings
-  -- Use the pre-defined buffer dimensions to create the final image.
-  pure $ generateCanvas (fromIntegral bufferWidth) (fromIntegral bufferHeight) finalGlyphs
+  pure $ generateCanvas (fi bufferWidth) (fi bufferHeight) finalGlyphs
   where
-    gapBetweenModules :: Float = 0
-    baseline :: Float = fromIntegral bufferHeight * 0.75
-
+    baseline :: Float = fi bufferHeight * 0.75
     composeDrawings :: [Either Spacer (RenderResult, Float)] -> RenderResult
     composeDrawings barElements = go 0 barElements
       where
-        bufferWidthF :: Float = fromIntegral bufferWidth
-        elementsWidth = sum $ snd <$> rights barElements
-        spacerCount = fromIntegral . length $ lefts barElements
+        -- each element has a gap except the last one
+        elementsWidth = subtract ctx.moduleGap . sum $ (+ ctx.moduleGap) . snd <$> rights barElements
+        spacerCount = fi . length $ lefts barElements
         -- Avoid division by zero if there are no spacers
-        spacerWidth =
-          if spacerCount > 0
-            then (bufferWidthF - elementsWidth) / spacerCount
-            else 0
+        spacerWidth = bool 0 ((fi bufferWidth - elementsWidth) / spacerCount) (spacerCount > 0)
 
         go :: Float -> [Either Spacer (RenderResult, Float)] -> RenderResult
         go _ [] = []
@@ -103,8 +100,7 @@ renderBar ctx modules = do
             -- Shift these glyphs to the current margin and baseline
             positioned = map (translateGlyph margin baseline) glyphs
             -- Continue with the rest
-            others = go (margin + width) rest
+            others = go (margin + width + ctx.moduleGap) rest
            in
-            positioned ++ others
-        go margin (Left Spacer : rest) =
-          go (margin + gapBetweenModules + spacerWidth) rest
+            positioned <> others
+        go margin (Left Spacer : rest) = go (margin + spacerWidth) rest

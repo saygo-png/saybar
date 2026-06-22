@@ -8,11 +8,12 @@ import Data.Time.Format (defaultTimeLocale)
 import Data.Time.LocalTime (getZonedTime)
 import Foreign (Ptr)
 import Generated.Fcft (Fcft_font)
-import Relude hiding (ByteString, get, isPrefixOf, put)
+import Relude hiding (get, isPrefixOf, put)
 import RenderText (getGlyphs, renderGlyphs)
 import Saywayland
-import Types
 import Saywayland.Types
+import System.Process.Typed
+import Types
 
 -- | How a module decides when to refresh.
 data ModuleTrigger
@@ -21,9 +22,12 @@ data ModuleTrigger
   | -- | react to a Wayland event
     OnWaylandEvent (WaylandEvent -> Wayland ())
 
+data Spacer = Spacer
+
 data RenderCtx = RenderCtx
   { font :: Ptr Fcft_font
   , fontSize :: Int
+  , moduleGap :: Float
   , drawColor :: PixelRGBA8
   }
 
@@ -34,8 +38,6 @@ data BarModule = forall a. BarModule
   , getData :: IO a
   , render :: RenderFrom a
   }
-
-data Spacer = Spacer
 
 runModule :: RenderCtx -> Either Spacer BarModule -> IO (Either Spacer (RenderResult, Float))
 runModule ctx = traverse (\(BarModule _ getData render) -> getData >>= render ctx)
@@ -54,11 +56,24 @@ startModules mods wakeUp =
     OnWaylandEvent handler ->
       onEvent handler
 
--- | Render a date/time string at the origin.
-renderDate :: RenderFrom Text
-renderDate ctx t = do
-  textRun <- getGlyphs ctx.font t
-  renderGlyphs ctx.font textRun ctx.drawColor 0 0
+mkShellModule :: Text -> Int -> BarModule
+mkShellModule cmd interval =
+  BarModule
+    { trigger = OnTimer interval
+    , getData = getOutput
+    , render = renderOutput
+    }
+  where
+    getOutput :: IO Text
+    getOutput = do
+      (out, err) <- readProcess_ $ proc (toString cmd) []
+      putStrLn $ decodeUtf8 err
+      pure . mconcat . lines $ decodeUtf8 @Text @LByteString out
+    -- Render a date/time string at the origin.
+    renderOutput :: RenderFrom Text
+    renderOutput ctx t = do
+      textRun <- getGlyphs ctx.font t
+      renderGlyphs ctx.font textRun ctx.drawColor 0 0
 
 -- | Current date/time, refreshed every second.
 dateModule :: BarModule
@@ -73,26 +88,11 @@ dateModule =
     getDate = do
       now <- getZonedTime
       pure . toText $ formatTime defaultTimeLocale "%a %Y-%m(%B)-%d %H:%M" now
-
-{- | Render the workspace list.
-  Active workspace is highlighted, Urgent is red, Hidden is skipped.
--}
-renderWorkspaces :: RenderFrom [Workspace]
-renderWorkspaces ctx workspaces = do
-  textRun <- getGlyphs ctx.font visible
-  renderGlyphs ctx.font textRun ctx.drawColor 0 0
-  where
-    -- TODO: implement different colors
-    activeColor = PixelRGBA8 251 241 199 255
-    urgentColor = PixelRGBA8 251 73 52 255
-
-    visible = T.intercalate " " $ mapMaybe toLabel workspaces
-
-    toLabel w = case w.wsState of
-      Hidden -> Nothing
-      Active -> Just ("[" <> w.wsName <> "]")
-      Urgent -> Just ("!" <> w.wsName <> "!")
-      Inactive -> Just w.wsName
+    -- Render a date/time string at the origin.
+    renderDate :: RenderFrom Text
+    renderDate ctx t = do
+      textRun <- getGlyphs ctx.font t
+      renderGlyphs ctx.font textRun ctx.drawColor 0 0
 
 {- | Workspace list.
   Pass a TVar kept up to date by workspaceEventsHandler in Bar.hs.
@@ -104,3 +104,22 @@ workspaceModule wsVar =
     , getData = readTVarIO wsVar
     , render = renderWorkspaces
     }
+  where
+    -- Render the workspace list.
+    -- Active workspace is highlighted, Urgent is red, Hidden is skipped.
+    renderWorkspaces :: RenderFrom [Workspace]
+    renderWorkspaces ctx workspaces = do
+      textRun <- getGlyphs ctx.font visible
+      renderGlyphs ctx.font textRun ctx.drawColor 0 0
+      where
+        -- TODO: implement different colors
+        activeColor = PixelRGBA8 251 241 199 255
+        urgentColor = PixelRGBA8 251 73 52 255
+
+        visible = T.intercalate " " $ mapMaybe toLabel workspaces
+
+        toLabel w = case w.wsState of
+          Hidden -> Nothing
+          Active -> Just ("[" <> w.wsName <> "]")
+          Urgent -> Just ("!" <> w.wsName <> "!")
+          Inactive -> Just w.wsName
