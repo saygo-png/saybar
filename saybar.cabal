@@ -1,86 +1,62 @@
-cabal-version: 2.4
-name:          saybar
-version:       0
-build-type:    Simple
-author:        saygo-png
-maintainer:    saygo-png <saygo.mail@proton.me>
-copyright:     2024 saygo-png
+cabal-version: 3.0
+name: saybar
+version: 0.0.0
+build-type: Simple
+author: saygo-png
+maintainer: saygo-png <saygo.mail@proton.me>
+copyright: 2024 saygo-png
+license: GPL-3.0-or-later
+license-file: LICENSE.txt
+category: Graphics
+synopsis: extensible Wayland bar configured in source
+homepage: https://github.com/saygo-png/saybar
+bug-reports: https://github.com/saygo-png/saybar/issues
 
 common common-options
   build-depends:
-    , base    >=4.7 && <5
-    , relude
+    base >=4.7 && <5,
+    relude,
 
-  default-language:   GHC2021
+  default-language: GHC2024
   ghc-options:
-    -Weverything -Wno-missed-extra-shared-lib
-    -Wno-missing-kind-signatures -Wno-safe -Wno-unsafe
-    -Wno-missing-import-lists -Wno-all-missed-specialisations
-    -Wno-missed-specialisations -Wno-missing-safe-haskell-mode
-    -Wno-missing-exported-signatures -Wno-missing-local-signatures
+    -Weverything
+    -Wno-all-missed-specialisations
+    -Wno-missed-specialisations
+    -Wno-missing-exported-signatures
+    -Wno-missing-import-lists
+    -Wno-missing-kind-signatures
+    -Wno-missing-local-signatures
+    -Wno-missing-safe-haskell-mode
+    -Wno-safe
+    -Wno-unsafe
+    -Wno-unticked-promoted-constructors
+    -Werror=missing-fields
+    -Werror=incomplete-patterns
+    -Werror=incomplete-uni-patterns
+    -Werror=missing-methods
     -threaded
 
   default-extensions:
-    BangPatterns
-    BinaryLiterals
-    ConstraintKinds
-    DataKinds
-    DefaultSignatures
-    DeriveDataTypeable
-    DeriveFoldable
-    DeriveFunctor
-    DeriveGeneric
-    DeriveTraversable
-    DerivingStrategies
-    DoAndIfThenElse
     DuplicateRecordFields
-    EmptyDataDecls
-    ExistentialQuantification
-    FlexibleContexts
-    FlexibleInstances
-    FunctionalDependencies
-    GADTs
-    GeneralizedNewtypeDeriving
-    InstanceSigs
-    KindSignatures
-    LambdaCase
-    MultiParamTypeClasses
     MultiWayIf
-    NamedFieldPuns
     NoFieldSelectors
     NoImplicitPrelude
     OverloadedRecordDot
     OverloadedStrings
     PartialTypeSignatures
-    PatternGuards
-    PolyKinds
-    RankNTypes
-    RoleAnnotations
-    ScopedTypeVariables
-    StandaloneDeriving
-    TupleSections
-    TypeFamilies
-    TypeSynonymInstances
-    ViewPatterns
 
 -- Internal library so that `src/` belongs to exactly one component which fixes issues with hls.
-
 library fcft-bindings
-  hs-source-dirs:    bindings
-  ghc-options:       -threaded
+  hs-source-dirs: bindings
+  ghc-options: -threaded
   pkgconfig-depends: fcft
-  default-language:  GHC2021
+  default-language: GHC2021
   build-depends:
-    , base                >=4.7 && <5
-    , bytestring
-    , c-expr-runtime
-    , containers
-    , hs-bindgen-runtime
-    , JuicyPixels
-    , saywayland
-    , time
-    , vector
+    base >=4.7 && <5,
+    c-expr-runtime,
+    hs-bindgen-runtime,
 
+  -- cabal-gild: discover bindings --exclude=bindings/Generated/Fcft/Unsafe.hs
   exposed-modules:
     Generated.Fcft
     Generated.Fcft.FunPtr
@@ -88,20 +64,24 @@ library fcft-bindings
     Manual.Fcft
 
 library saybar-internal
-  import:            common-options
-  hs-source-dirs:    src
-  pkgconfig-depends: fcft, pixman-1
-  build-depends:
-    , typed-process
-    , bytestring
-    , containers
-    , fcft-bindings
-    , hs-bindgen-runtime
-    , JuicyPixels
-    , saywayland
-    , time
-    , vector
+  import: common-options
+  hs-source-dirs: src
+  pkgconfig-depends:
+    fcft,
+    pixman-1,
 
+  build-depends:
+    JuicyPixels,
+    bytestring,
+    containers,
+    fcft-bindings,
+    hs-bindgen-runtime,
+    sayland,
+    time,
+    typed-process,
+    vector,
+
+  -- cabal-gild: discover src
   exposed-modules:
     Bar
     Config
@@ -110,27 +90,30 @@ library saybar-internal
     Types
 
 executable saybar
-  import:            common-options
-  ghc-options:       -rtsopts -with-rtsopts=-N
-  hs-source-dirs:    app
+  import: common-options
+  ghc-options:
+    -rtsopts
+    -with-rtsopts=-N
+
+  hs-source-dirs: app
   pkgconfig-depends: fcft
-  main-is:           Main.hs
+  main-is: Main.hs
   build-depends:
-    , bytestring
-    , containers
-    , fcft-bindings
-    , JuicyPixels
-    , network
-    , saybar-internal
-    , saywayland
-    , unix
+    JuicyPixels,
+    bytestring,
+    containers,
+    fcft-bindings,
+    network,
+    saybar-internal,
+    sayland,
+    unix,
 
 benchmark saybar-bench
-  import:         common-options
-  type:           exitcode-stdio-1.0
+  import: common-options
+  type: exitcode-stdio-1.0
   hs-source-dirs: bench
-  main-is:        Main.hs
+  main-is: Main.hs
   build-depends:
-    , criterion
-    , JuicyPixels
-    , saybar-internal
+    JuicyPixels,
+    criterion,
+    saybar-internal,
