@@ -8,7 +8,9 @@ import Codec.Picture.Types (Image)
 import Config
 import Control.Exception
 import Data.Map qualified as Map
+import Data.Set qualified as Set
 import Foreign (nullPtr)
+import GHC.Conc (orElse, retry)
 import GHC.IO.Handle
 import Generated.Fcft
 import Generated.Fcft.Safe
@@ -33,6 +35,14 @@ program :: Wayland Client ()
 program = do
   ClientEnv env <- ask
 
+  outputs :: TVar (Set GlobalName) <- newTVarIO mempty
+  closed :: TVar Bool <- newTVarIO False
+
+  onEventDo $ \_ -> \case
+    Event_wl_registry_global name iface _ | iface == getInterfaceName (Proxy @Wl_output) -> atomically $ modifyTVar' outputs (Set.insert name)
+    Event_wl_registry_global_remove name -> atomically $ modifyTVar' outputs (Set.delete name)
+    _ -> pass
+
   wlDisplay <- getWlDisplay
   registry <- newObject wlDisplay Request_wl_display_get_registry
 
@@ -44,7 +54,7 @@ program = do
   workspacesVar :: TVar [Workspace] <- newTVarIO mempty -- live workspace list
   wakeUp :: TMVar () <- newEmptyTMVarIO
   serial :: TMVar Word32 <- newEmptyTMVarIO
-  freeBuffer :: MVar () <- newEmptyMVar
+  freeBuffer :: TMVar () <- newEmptyTMVarIO
 
   putStrLn "Binding to required interfaces..."
 
@@ -72,32 +82,37 @@ program = do
   onEventDo $ \_ -> \case
     (Event_zwlr_layer_surface_v1_configure s _ _) ->
       atomically $ tryTakeTMVar serial >> putTMVar serial s
-    _ -> pass
+    Event_zwlr_layer_surface_v1_closed -> atomically $ writeTVar closed True
 
   onEventDo $ \_ -> \case
     Event_wl_buffer_release ->
-      takeMVar freeBuffer
+      atomically . void $ tryTakeTMVar freeBuffer
 
   let modules = makeModules workspacesVar
   startModules (rights modules) wakeUp
 
-  wlSurfaceID <- newObject wlCompositor Request_wl_compositor_create_surface
-  layerSurfaceID <- newObject layerShell $ \wlid ->
-    Request_zwlr_layer_shell_v1_get_layer_surface wlid wlSurfaceID.wlid Nothing Enum_zwlr_layer_shell_v1_layer_top "saybar"
+  let createBar = do
+        wlSurfaceID <- newObject wlCompositor Request_wl_compositor_create_surface
+        layerSurfaceID <- newObject layerShell $ \wlid ->
+          Request_zwlr_layer_shell_v1_get_layer_surface wlid wlSurfaceID.wlid Nothing Enum_zwlr_layer_shell_v1_layer_top "saybar"
 
-  sendMsg layerSurfaceID
-    $ Request_zwlr_layer_surface_v1_set_anchor
-      Enum_zwlr_layer_surface_v1_anchor
-        { anchor_top = True
-        , anchor_bottom = False
-        , anchor_left = True
-        , anchor_right = True
-        }
-  sendMsg layerSurfaceID $ Request_zwlr_layer_surface_v1_set_size 0 bufferHeight
-  sendMsg layerSurfaceID $ Request_zwlr_layer_surface_v1_set_exclusive_zone (fi bufferHeight)
+        sendMsg layerSurfaceID
+          $ Request_zwlr_layer_surface_v1_set_anchor
+            Enum_zwlr_layer_surface_v1_anchor
+              { anchor_top = True
+              , anchor_bottom = False
+              , anchor_left = True
+              , anchor_right = True
+              }
+        sendMsg layerSurfaceID $ Request_zwlr_layer_surface_v1_set_size 0 bufferHeight
+        sendMsg layerSurfaceID $ Request_zwlr_layer_surface_v1_set_exclusive_zone (fi bufferHeight)
 
-  sendMsg wlSurfaceID Request_wl_surface_commit
-  sendMsg layerSurfaceID . Request_zwlr_layer_surface_v1_ack_configure =<< atomically (takeTMVar serial)
+        atomically $ writeTVar closed False >> void (tryTakeTMVar serial) >> void (tryTakeTMVar freeBuffer)
+        sendMsg wlSurfaceID Request_wl_surface_commit
+        pure (wlSurfaceID, layerSurfaceID)
+
+      untilClosed :: STM a -> Wayland Client (Maybe a)
+      untilClosed act = atomically $ (Nothing <$ (readTVar closed >>= (`unless` retry))) `orElse` (Just <$> act)
 
   _ <- liftIO $ fcft_init FCFT_LOG_COLORIZE_AUTO 0 FCFT_LOG_CLASS_DEBUG
   font <- liftIO $ fcft_from_name2 ["monospace:size=14"] Nothing nullPtr
@@ -133,27 +148,39 @@ program = do
 
           fileHandle <- liftIO $ fdToHandle fileDescriptor
 
-          let renderLoop :: ((Wl_buffer, Word32), (Wl_buffer, Word32)) -> Wayland Client ()
-              renderLoop buffers = do
-                atomically $ takeTMVar wakeUp
+          let renderLoop :: Wl_surface -> Zwlr_layer_surface_v1 -> ((Wl_buffer, Word32), (Wl_buffer, Word32)) -> Wayland Client ()
+              renderLoop wlSurfaceID layerSurfaceID buffers = whenJustM (untilClosed $ takeTMVar wakeUp) $ \() -> do
                 image <- liftIO $ renderBar ctx modules
                 atomically (tryTakeTMVar serial) >>= traverse_ (sendMsg layerSurfaceID . Request_zwlr_layer_surface_v1_ack_configure)
-                putImage wlSurfaceID fileHandle image (fst buffers) freeBuffer
+                putImage wlSurfaceID fileHandle image (fst buffers)
                 putTextLn "rerender!!!"
-                renderLoop (swap buffers)
+                whenJustM (untilClosed $ putTMVar freeBuffer ()) $ \() -> renderLoop wlSurfaceID layerSurfaceID (swap buffers)
 
-          renderLoop (bufferA, bufferB)
+              barLoop previous = do
+                current <- atomically $ do
+                  current <- readTVar outputs
+                  when (Set.null current || Just current == previous) retry
+                  pure current
+                (wlSurfaceID, layerSurfaceID) <- createBar
+                whenJustM (untilClosed $ takeTMVar serial) $ \s -> do
+                  sendMsg layerSurfaceID $ Request_zwlr_layer_surface_v1_ack_configure s
+                  atomically . void $ tryPutTMVar wakeUp ()
+                  renderLoop wlSurfaceID layerSurfaceID (bufferA, bufferB)
+                sendMsg layerSurfaceID Request_zwlr_layer_surface_v1_destroy
+                sendMsg wlSurfaceID Request_wl_surface_destroy
+                barLoop (Just current)
+
+          barLoop Nothing
 
   liftIO . void $ bracket makeSharedMemoryObject removeSharedMemoryObject useSharedMemoryObject
   where
-    putImage :: Wl_surface -> Handle -> Image PixelRGBA8 -> (Wl_buffer, Word32) -> MVar () -> Wayland Client ()
-    putImage wlSurface fileHandle image (buffer, offset) freeBuffer = do
+    putImage :: Wl_surface -> Handle -> Image PixelRGBA8 -> (Wl_buffer, Word32) -> Wayland Client ()
+    putImage wlSurface fileHandle image (buffer, offset) = do
       liftIO . hSeek fileHandle AbsoluteSeek $ fi offset
       liftIO $ writeSwizzledRGBAtoBGRA fileHandle image
       sendMsg wlSurface $ Request_wl_surface_damage_buffer 0 0 (fi bufferWidth) (fi bufferHeight)
       sendMsg wlSurface $ Request_wl_surface_attach (Just buffer.wlid) 0 0
       sendMsg wlSurface Request_wl_surface_commit
-      putMVar freeBuffer ()
 
     -- \| Promote a WorkspaceMap to a clean sorted [Workspace].
     --   Returns Nothing if any workspace is still missing fields.
