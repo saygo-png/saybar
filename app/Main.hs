@@ -43,7 +43,7 @@ program = do
   committed :: TVar WorkspaceMap <- newTVarIO mempty
   workspacesVar :: TVar [Workspace] <- newTVarIO mempty -- live workspace list
   wakeUp :: TMVar () <- newEmptyTMVarIO
-  serial :: TMVar WlUInt <- newEmptyTMVarIO
+  serial :: TMVar Word32 <- newEmptyTMVarIO
   freeBuffer :: MVar () <- newEmptyMVar
 
   putStrLn "Binding to required interfaces..."
@@ -65,7 +65,7 @@ program = do
     _ -> pass
 
   onEventDo $ \oid ev ->
-    modifyIORef pendingRef $ \pending -> workspaceEventsHandler pending (coerce $ fromAnyObjectID oid) ev
+    modifyIORef pendingRef $ \pending -> workspaceEventsHandler pending (fromAnyObjectID oid) ev
 
   _ext_workspace_manager_V1ID <- bindToInterface @Ext_workspace_manager_v1 registry
 
@@ -83,7 +83,7 @@ program = do
 
   wlSurfaceID <- newObject wlCompositor Request_wl_compositor_create_surface
   layerSurfaceID <- newObject layerShell $ \wlid ->
-    Request_zwlr_layer_shell_v1_get_layer_surface wlid wlSurfaceID.wlid Nothing Enum_zwlr_layer_shell_v1_layer_top (wlTextLossy "saybar")
+    Request_zwlr_layer_shell_v1_get_layer_surface wlid wlSurfaceID.wlid Nothing Enum_zwlr_layer_shell_v1_layer_top "saybar"
 
   sendMsg layerSurfaceID
     $ Request_zwlr_layer_surface_v1_set_anchor
@@ -93,7 +93,7 @@ program = do
         , anchor_left = True
         , anchor_right = True
         }
-  sendMsg layerSurfaceID $ Request_zwlr_layer_surface_v1_set_size 0 (coerce bufferHeight)
+  sendMsg layerSurfaceID $ Request_zwlr_layer_surface_v1_set_size 0 bufferHeight
   sendMsg layerSurfaceID $ Request_zwlr_layer_surface_v1_set_exclusive_zone (fi bufferHeight)
 
   sendMsg wlSurfaceID Request_wl_surface_commit
@@ -120,7 +120,7 @@ program = do
           let frameSize = bufferWidth * bufferHeight * colorChannels
           let poolSize = 2 * frameSize -- 2x for double buffering
           liftIO . setFdSize fileDescriptor $ fi poolSize
-          wlShmPool <- newObject wlShm $ \wlid -> Request_wl_shm_create_pool wlid (coerce fileDescriptor) (fi poolSize)
+          wlShmPool <- newObject wlShm $ \wlid -> Request_wl_shm_create_pool wlid fileDescriptor (fi poolSize)
 
           let stride = bufferWidth * colorChannels
               mkBuffer offset = do

@@ -68,11 +68,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1769957634,
-        "narHash": "sha256-z3otKLzVNniGJR3mPqYs7MNWTEaTkrhCukJBYv8AIhw=",
+        "lastModified": 1793820107,
+        "narHash": "sha256-BVTB8qhvODsAz3rmzzm5rugDHcwlyv+dmqhcsjR4M0o=",
         "owner": "saygo-png",
         "repo": "nice-nixpkgs-haskell",
-        "rev": "7022cfcd645c4b831716d4a56970feea7caa2906",
+        "rev": "803984353d902c924e194b8907044a72758cb2ed",
         "type": "github"
       },
       "original": {
@@ -149,33 +149,19 @@
         "hs-bindgen": "hs-bindgen",
         "niceHaskell": "niceHaskell",
         "nixpkgs": "nixpkgs_2",
-        "sayland": "sayland",
+        "saylandSrc": "saylandSrc",
         "systems": "systems",
         "treefmt-nix": "treefmt-nix"
       }
     },
-    "sayland": {
-      "inputs": {
-        "git-hooks": [],
-        "niceHaskell": [
-          "niceHaskell"
-        ],
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "systems": [
-          "systems"
-        ],
-        "treefmt-nix": [
-          "treefmt-nix"
-        ]
-      },
+    "saylandSrc": {
+      "flake": false,
       "locked": {
-        "lastModified": 1792014176,
-        "narHash": "sha256-YPJ7llvTo+WXptQwOff6VyMrskPlpX2oHeQa1tiR/WU=",
+        "lastModified": 1793717730,
+        "narHash": "sha256-Ye5tM/EraMPdux2kO8dW9xcV1qiVkZO6bcW1ty6ByLA=",
         "owner": "saygo-png",
         "repo": "sayland",
-        "rev": "4c746a620c402952561934a6bf3677caab67e019",
+        "rev": "ffe624cf91c4d59b7ceda5a645cfbefd9483dad6",
         "type": "github"
       },
       "original": {
