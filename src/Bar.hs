@@ -2,15 +2,13 @@ module Bar (writeSwizzledRGBAtoBGRA, workspaceEventsHandler, renderBar) where
 
 import Codec.Picture
 import Config
-import Data.Bits
 import Data.Map qualified as Map
 import Data.Vector.Storable qualified as VS
 import GHC.IO.Handle (hPutBuf)
 import Modules
 import Relude hiding (ByteString, get, isPrefixOf, put)
 import RenderText
-import Saywayland
-import Saywayland.Types
+import Sayland
 import Types
 
 fi :: forall a b. (Integral a, Num b) => a -> b
@@ -36,47 +34,34 @@ writeSwizzledRGBAtoBGRA handle image =
             2 -> premul r a
             _ -> a
 
-workspaceEventsHandler :: WorkspaceMap -> WaylandEvent -> WorkspaceMap
-workspaceEventsHandler workspaces = \case
-  EvExtWorkspaceHandleV1_name h e ->
-    Map.alter
-      ( \case
-          Nothing -> pure $ PendingWorkspace (Just $ wlToText e.name) Nothing Nothing
-          Just w -> pure w{pwName = Just $ wlToText e.name}
-      )
-      h.objectID
-      workspaces
-  EvExtWorkspaceHandleV1_coordinates h e ->
-    Map.alter
-      ( \case
-          Nothing -> pure $ PendingWorkspace Nothing (Just . fromIntegral $ sum e.coordinates) Nothing
-          Just w -> pure w{pwCoordinates = Just . fromIntegral $ sum e.coordinates}
-      )
-      h.objectID
-      workspaces
-  EvExtWorkspaceHandleV1_state h e ->
-    Map.alter
-      ( \case
-          Nothing -> pure $ PendingWorkspace Nothing Nothing (Just $ decodeState e.state)
-          Just w -> pure w{pwState = Just $ decodeState e.state}
-      )
-      h.objectID
-      workspaces
-    where
-      -- https://wayland.app/protocols/ext-workspace-v1#ext_workspace_handle_v1:enum:state
-      decodeState s
-        | s .&. 2 /= 0 = Urgent
-        | s .&. 1 /= 0 = Active
-        | s .&. 4 /= 0 = Hidden
-        | otherwise = Inactive
-  EvExtWorkspaceHandleV1_removed h _ ->
-    Map.delete h.objectID workspaces
+workspaceEventsHandler :: WorkspaceMap -> Word32 -> Event_ext_workspace_handle_v1 -> WorkspaceMap
+workspaceEventsHandler workspaces oid = \case
+  Event_ext_workspace_handle_v1_name name -> update $ \w -> w{pwName = Just $ fromWlText name}
+  Event_ext_workspace_handle_v1_coordinates cords -> update $ \w -> w{pwCoordinates = Just . fi . sum $ decodeCoordinates cords}
+  Event_ext_workspace_handle_v1_state wState -> update $ \w -> w{pwState = Just $ decodeState wState}
+  Event_ext_workspace_handle_v1_removed -> Map.delete oid workspaces
   _ -> workspaces
+  where
+    update f = Map.insert oid (f current) workspaces
+    current = Map.findWithDefault (PendingWorkspace Nothing Nothing Nothing) oid workspaces
 
-{- | Run every module left-to-right, compose their drawings, rasterize.
-  Each module's render function returns the pixel width it consumed,
-  which is used to advance the pen for the next module.
--}
+    decodeState s
+      | s.state_urgent = Urgent
+      | s.state_active = Active
+      | s.state_hidden = Hidden
+      | otherwise = Inactive
+
+    -- Coordinates are an array of uints.
+    decodeCoordinates :: WlArray -> [WlUInt]
+    decodeCoordinates (WlArray bytes) = unfoldr next bytes
+      where
+        next rest = case runWireGet getWlUInt [] rest of
+          (Right uint, rest', _) -> Just (uint, rest')
+          (Left _, _, _) -> Nothing
+
+-- | Run every module left-to-right, compose their drawings, rasterize.
+--   Each module's render function returns the pixel width it consumed,
+--   which is used to advance the pen for the next module.
 renderBar :: RenderCtx -> [Either Spacer BarModule] -> IO (Image PixelRGBA8)
 renderBar ctx modules = do
   drawings <- mapM (runModule ctx) modules

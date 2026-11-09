@@ -6,55 +6,35 @@ import Bar
 import Codec.Picture (PixelRGBA8 (..))
 import Codec.Picture.Types (Image)
 import Config
-import Control.Concurrent (forkIO)
 import Control.Exception
 import Data.Map qualified as Map
 import Foreign (nullPtr)
-import Foreign.C
 import GHC.IO.Handle
 import Generated.Fcft
 import Generated.Fcft.Safe
 import Manual.Fcft
 import Modules
-import Network.Socket
 import Relude hiding (ByteString, get, isPrefixOf, put)
 import RenderText (getGlyphs, renderGlyphs)
-import Saywayland
-import Saywayland.Types
+import Sayland
 import System.Posix (ownerReadMode, ownerWriteMode, setFdSize, unionFileModes)
 import System.Posix.IO
 import System.Posix.SharedMem
 import Types
+import Utils
 
-cFalse, cTrue :: CBool
-cFalse = CBool 0
-cTrue = CBool 1
-
-showCBool :: CBool -> Text
-showCBool = show . (/=) 0
-
-fi :: forall a b. (Integral a, Num b) => a -> b
-fi = fromIntegral
+table :: ProtocolTable
+table = ext_workspace_v1Table <> wlr_layer_shell_unstable_v1Table <> waylandTable <> xdg_shellTable
 
 main :: IO ()
-main = do
-  runReaderT program =<< waylandSetup
-  where
-    waylandSetup :: IO WaylandEnv
-    waylandSetup = do
-      sock <- connectToWlSocket
-      counter <- newIORef $ coerce wlDisplayID + 1
-      globals <- newIORef mempty
-      objects <- newIORef mempty
-      handlers <- newIORef mempty
-      pure $ ClientEnv sock counter globals objects handlers
+main = withWaylandClient table program
 
-program :: Wayland ()
+program :: Wayland Client ()
 program = do
-  env <- ask
-  startEventLoop env
+  ClientEnv env <- ask
 
-  registryID <- wlDisplay_getRegistry
+  wlDisplay <- getWlDisplay
+  registry <- newObject wlDisplay Request_wl_display_get_registry
 
   -- `pendingRef` accumulates event-by-event within a batch.
   -- `committed` is only updated on `done` and is what gets rendered.
@@ -63,44 +43,63 @@ program = do
   committed :: TVar WorkspaceMap <- newTVarIO mempty
   workspacesVar :: TVar [Workspace] <- newTVarIO mempty -- live workspace list
   wakeUp :: TMVar () <- newEmptyTMVarIO
-  serial :: TMVar WlUint <- newEmptyTMVarIO
+  serial :: TMVar WlUInt <- newEmptyTMVarIO
   freeBuffer :: MVar () <- newEmptyMVar
 
   putStrLn "Binding to required interfaces..."
-  wlShmID <- bindToInterface registryID env.globals "wl_shm" WlShm
-  wlCompositorID <- bindToInterface registryID env.globals "wl_compositor" WlCompositor
-  zwlrLayerShellV1ID <- bindToInterface registryID env.globals "zwlr_layer_shell_v1" ZwlrLayerShellV1
-  _extWorkspaceManagerV1ID <- bindToInterface registryID env.globals "ext_workspace_manager_v1" ExtWorkspaceManagerV1
 
-  onEvent $ \case
-    EvExtWorkspaceManagerV1_done _ _ -> do
+  roundtrip
+
+  wlShm <- bindToInterface registry
+  wlCompositor <- bindToInterface registry
+  layerShell <- bindToInterface registry
+
+  onEventDo $ \_ -> \case
+    Event_ext_workspace_manager_v1_done -> do
       pending <- readIORef pendingRef
       let resolved = resolveWorkspaces pending
       atomically $ do
         writeTVar committed pending
         forM_ resolved $ writeTVar workspacesVar
         void $ tryPutTMVar wakeUp ()
-    ev -> modifyIORef pendingRef (`workspaceEventsHandler` ev)
+    _ -> pass
 
-  onEvent $ \case
-    (EvZwlrLayerSurfaceV1_configure _ body) ->
-      atomically $ putTMVar serial body.serial
-    (EvWlBuffer_release _ _) ->
+  onEventDo $ \oid ev ->
+    modifyIORef pendingRef $ \pending -> workspaceEventsHandler pending (coerce $ fromAnyObjectID oid) ev
+
+  _ext_workspace_manager_V1ID <- bindToInterface @Ext_workspace_manager_v1 registry
+
+  onEventDo $ \_ -> \case
+    (Event_zwlr_layer_surface_v1_configure s _ _) ->
+      atomically $ tryTakeTMVar serial >> putTMVar serial s
+    _ -> pass
+
+  onEventDo $ \_ -> \case
+    Event_wl_buffer_release ->
       takeMVar freeBuffer
-    _ -> pure ()
 
   let modules = makeModules workspacesVar
   startModules (rights modules) wakeUp
 
-  wlSurfaceID <- wlCompositor_createSurface wlCompositorID
-  layerSurfaceID <- zwlrLayerShellV1_getLayerSurface zwlrLayerShellV1ID wlSurfaceID 2 "saybar"
-  zwlrLayerSurfaceV1_setAnchor layerSurfaceID 13 -- top left right anchors
-  zwlrLayerSurfaceV1_setSize layerSurfaceID 0 bufferHeight
-  zwlrLayerSurfaceV1_setExclusiveZone layerSurfaceID (fromIntegral bufferHeight)
-  wlSurface_commit wlSurfaceID
-  zwlrLayerSurfaceV1_ackConfigure layerSurfaceID =<< atomically (takeTMVar serial)
+  wlSurfaceID <- newObject wlCompositor Request_wl_compositor_create_surface
+  layerSurfaceID <- newObject layerShell $ \wlid ->
+    Request_zwlr_layer_shell_v1_get_layer_surface wlid wlSurfaceID.wlid Nothing Enum_zwlr_layer_shell_v1_layer_top (wlTextLossy "saybar")
 
-  _ <- liftIO $ fcft_init FCFT_LOG_COLORIZE_AUTO cFalse FCFT_LOG_CLASS_DEBUG
+  sendMsg layerSurfaceID
+    $ Request_zwlr_layer_surface_v1_set_anchor
+      Enum_zwlr_layer_surface_v1_anchor
+        { anchor_top = True
+        , anchor_bottom = False
+        , anchor_left = True
+        , anchor_right = True
+        }
+  sendMsg layerSurfaceID $ Request_zwlr_layer_surface_v1_set_size 0 (coerce bufferHeight)
+  sendMsg layerSurfaceID $ Request_zwlr_layer_surface_v1_set_exclusive_zone (fi bufferHeight)
+
+  sendMsg wlSurfaceID Request_wl_surface_commit
+  sendMsg layerSurfaceID . Request_zwlr_layer_surface_v1_ack_configure =<< atomically (takeTMVar serial)
+
+  _ <- liftIO $ fcft_init FCFT_LOG_COLORIZE_AUTO 0 FCFT_LOG_CLASS_DEBUG
   font <- liftIO $ fcft_from_name2 ["monospace:size=14"] Nothing nullPtr
 
   textRun <- liftIO $ getGlyphs font " "
@@ -117,23 +116,28 @@ program = do
   let makeSharedMemoryObject = shmOpen poolName (ShmOpenFlags True True False True) (Relude.foldl' unionFileModes ownerWriteMode [ownerReadMode])
       removeSharedMemoryObject _ = shmUnlink poolName
       useSharedMemoryObject fileDescriptor =
-        flip runReaderT env $ do
+        flip runReaderT (ClientEnv env) $ do
           let frameSize = bufferWidth * bufferHeight * colorChannels
           let poolSize = 2 * frameSize -- 2x for double buffering
           liftIO . setFdSize fileDescriptor $ fi poolSize
-          wlShmPoolID <- wlShm_createPool wlShmID fileDescriptor (fi poolSize)
-          bufferA <- wlShmPool_createBuffer wlShmPoolID 0 (fi bufferWidth) (fi bufferHeight) (fi colorChannels) Argb8888
-          bufferB <- wlShmPool_createBuffer wlShmPoolID (fi frameSize) (fi bufferWidth) (fi bufferHeight) (fi colorChannels) Argb8888
+          wlShmPool <- newObject wlShm $ \wlid -> Request_wl_shm_create_pool wlid (coerce fileDescriptor) (fi poolSize)
+
+          let stride = bufferWidth * colorChannels
+              mkBuffer offset = do
+                buffer <- newObject wlShmPool $ \wlid ->
+                  Request_wl_shm_pool_create_buffer wlid (fi offset) (fi bufferWidth) (fi bufferHeight) (fi stride) Enum_wl_shm_format_argb8888
+                pure (buffer, offset)
+
+          bufferA <- mkBuffer 0
+          bufferB <- mkBuffer frameSize
 
           fileHandle <- liftIO $ fdToHandle fileDescriptor
 
-          let renderLoop :: (Buffer, Buffer) -> Wayland ()
+          let renderLoop :: ((Wl_buffer, Word32), (Wl_buffer, Word32)) -> Wayland Client ()
               renderLoop buffers = do
                 atomically $ takeTMVar wakeUp
-                -- glyphs <- liftIO $ getGlyphs font "[t] b m 4 5"
-                -- renderedGlyphs <- liftIO $ renderGlyphs font glyphs (PixelRGBA8 213 196 161 255) 0 (2)
-                -- let image = generateCanvas (fromIntegral bufferWidth) (fromIntegral bufferHeight) $ fst renderedGlyphs
                 image <- liftIO $ renderBar ctx modules
+                atomically (tryTakeTMVar serial) >>= traverse_ (sendMsg layerSurfaceID . Request_zwlr_layer_surface_v1_ack_configure)
                 putImage wlSurfaceID fileHandle image (fst buffers) freeBuffer
                 putTextLn "rerender!!!"
                 renderLoop (swap buffers)
@@ -142,21 +146,13 @@ program = do
 
   liftIO . void $ bracket makeSharedMemoryObject removeSharedMemoryObject useSharedMemoryObject
   where
-    startEventLoop env = do
-      liftIO
-        . void
-        . forkIO
-        $ finally
-          (putStrLn "\n--- Starting event loop ---" >> runReaderT eventLoop env)
-          (close env.socket)
-
-    putImage :: ObjectID 'WlSurface -> Handle -> Image PixelRGBA8 -> Buffer -> MVar () -> Wayland ()
-    putImage wlSurfaceID fileHandle image buffer freeBuffer = do
-      liftIO . hSeek fileHandle AbsoluteSeek $ fromIntegral buffer.offset
+    putImage :: Wl_surface -> Handle -> Image PixelRGBA8 -> (Wl_buffer, Word32) -> MVar () -> Wayland Client ()
+    putImage wlSurface fileHandle image (buffer, offset) freeBuffer = do
+      liftIO . hSeek fileHandle AbsoluteSeek $ fi offset
       liftIO $ writeSwizzledRGBAtoBGRA fileHandle image
-      wlSurface_damageBuffer wlSurfaceID 0 0 (fi bufferWidth) (fi bufferHeight)
-      wlSurface_attach wlSurfaceID buffer.id
-      wlSurface_commit wlSurfaceID
+      sendMsg wlSurface $ Request_wl_surface_damage_buffer 0 0 (fi bufferWidth) (fi bufferHeight)
+      sendMsg wlSurface $ Request_wl_surface_attach (Just buffer.wlid) 0 0
+      sendMsg wlSurface Request_wl_surface_commit
       putMVar freeBuffer ()
 
     -- \| Promote a WorkspaceMap to a clean sorted [Workspace].

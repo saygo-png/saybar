@@ -88,6 +88,7 @@ library saybar-internal
     Modules
     RenderText
     Types
+    Utils
 
 executable saybar
   import: common-options

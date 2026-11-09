@@ -2,7 +2,7 @@
   niceHaskell,
   c-expr-runtime,
   hs-bindgen-runtime,
-  saywayland,
+  sayland,
   ...
 }:
 niceHaskell.mkPackage {
@@ -11,6 +11,6 @@ niceHaskell.mkPackage {
   cabalName = "saybar";
   compiler = "ghc912";
   developPackageArgs.overrides = _: _: {
-    inherit c-expr-runtime hs-bindgen-runtime saywayland;
+    inherit c-expr-runtime hs-bindgen-runtime sayland;
   };
 }

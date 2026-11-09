@@ -1,7 +1,6 @@
 {
   inputs = {
     treefmt-nix.url = "github:numtide/treefmt-nix";
-    # nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     niceHaskell = {
       url = "github:saygo-png/nice-nixpkgs-haskell";
@@ -11,13 +10,14 @@
         treefmt-nix.follows = "treefmt-nix";
       };
     };
-    saywayland = {
-      url = "github:saygo-png/saywayland";
+    sayland = {
+      url = "github:saygo-png/sayland";
       inputs = {
         treefmt-nix.follows = "treefmt-nix";
         nixpkgs.follows = "nixpkgs";
         systems.follows = "systems";
         niceHaskell.follows = "niceHaskell";
+        git-hooks.follows = "";
       };
     };
     systems = {
@@ -30,7 +30,7 @@
   outputs = {
     nixpkgs,
     systems,
-    saywayland,
+    sayland,
     niceHaskell,
     hs-bindgen,
     treefmt-nix,
@@ -48,7 +48,7 @@
         niceHaskell = niceHaskell.outputs.niceHaskell.${system};
         # Provide dependencies for nix based builds
         inherit (pkgs.haskell.packages.ghc912) c-expr-runtime hs-bindgen-runtime;
-        inherit (saywayland.packages.${system}) saywayland;
+        inherit (sayland.packages.${system}) sayland;
       };
   in {
     packages = eachSystem (system: pkgs: {
@@ -64,7 +64,7 @@
           ghcPackages = pkgs.haskell.packages.ghc912;
           # Provide dependencies for cabal based builds
           ghcWithDeps = ghcPackages.ghcWithPackages (_ps: [
-            saywayland.packages.${system}.saywayland
+            sayland.packages.${system}.sayland
             ghcPackages.c-expr-runtime
             ghcPackages.hs-bindgen-runtime
           ]);

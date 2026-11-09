@@ -5,7 +5,6 @@ module Types where
 
 import Codec.Picture (Image, PixelRGBA8)
 import Relude
-import Saywayland.Types (WlUint)
 
 data WorkspaceState = Active | Urgent | Hidden | Inactive
   deriving stock (Show, Eq, Ord, Generic)
@@ -29,7 +28,7 @@ data Workspace = Workspace
   deriving stock (Show, Eq, Generic)
   deriving anyclass (NFData)
 
-type WorkspaceMap = Map WlUint PendingWorkspace
+type WorkspaceMap = Map Word32 PendingWorkspace
 
 data BarState = BarState
   { date :: Text

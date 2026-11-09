@@ -10,17 +10,18 @@ import Foreign (Ptr)
 import Generated.Fcft (Fcft_font)
 import Relude hiding (get, isPrefixOf, put)
 import RenderText (getGlyphs, renderGlyphs)
-import Saywayland
-import Saywayland.Types
+import Sayland
 import System.Process.Typed
 import Types
+import Utils
 
 -- | How a module decides when to refresh.
-data ModuleTrigger
-  = -- | interval in milliseconds
-    OnTimer Int
-  | -- | react to a Wayland event
-    OnWaylandEvent (WaylandEvent -> Wayland ())
+data ModuleTrigger where
+  -- | interval in milliseconds
+  OnTimer :: Int -> ModuleTrigger
+  -- | react to a Wayland event
+  OnWaylandEvent :: (Message (Event e)) => (Event e -> Wayland Client ()) -> ModuleTrigger
+  None :: ModuleTrigger
 
 data Spacer = Spacer
 
@@ -42,11 +43,10 @@ data BarModule = forall a. BarModule
 runModule :: RenderCtx -> Either Spacer BarModule -> IO (Either Spacer (RenderResult, Float))
 runModule ctx = traverse (\(BarModule _ getData render) -> getData >>= render ctx)
 
-{- | Start all modules.
-  Timer modules fork a background thread that nudges wakeUp each tick.
-  Event modules register an onEvent handler.
--}
-startModules :: [BarModule] -> TMVar () -> Wayland ()
+-- | Start all modules.
+--   Timer modules fork a background thread that nudges wakeUp each tick.
+--   Event modules register an onEvent handler.
+startModules :: [BarModule] -> TMVar () -> Wayland Client ()
 startModules mods wakeUp =
   forM_ mods $ \(BarModule trig _ _) -> case trig of
     OnTimer interval ->
@@ -54,7 +54,8 @@ startModules mods wakeUp =
         threadDelay (interval * 1000)
         atomically $ void $ tryPutTMVar wakeUp ()
     OnWaylandEvent handler ->
-      onEvent handler
+      onEventDo $ const handler
+    None -> pass
 
 mkShellModule :: Text -> Int -> BarModule
 mkShellModule cmd interval =
@@ -94,13 +95,12 @@ dateModule =
       textRun <- getGlyphs ctx.font t
       renderGlyphs ctx.font textRun ctx.drawColor 0 0
 
-{- | Workspace list.
-  Pass a TVar kept up to date by workspaceEventsHandler in Bar.hs.
--}
+-- | Workspace list.
+--   Pass a TVar kept up to date by workspaceEventsHandler in Bar.hs.
 workspaceModule :: TVar [Workspace] -> BarModule
 workspaceModule wsVar =
   BarModule
-    { trigger = OnWaylandEvent (\_ -> pure ()) -- wakeUp driven by done-event in Main
+    { trigger = None -- wakeUp driven by done-event in Main
     , getData = readTVarIO wsVar
     , render = renderWorkspaces
     }
