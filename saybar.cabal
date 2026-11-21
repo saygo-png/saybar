@@ -71,7 +71,6 @@ library saybar-internal
 
   build-depends:
     JuicyPixels,
-    bytestring,
     containers,
     fcft-bindings,
     hs-bindgen-runtime,
@@ -100,10 +99,8 @@ executable saybar
   main-is: Main.hs
   build-depends:
     JuicyPixels,
-    bytestring,
     containers,
     fcft-bindings,
-    network,
     saybar-internal,
     sayland,
     unix,
