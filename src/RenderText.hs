@@ -99,7 +99,7 @@ translateGlyph dx dy g =
 generateCanvas :: Int -> Int -> [RenderedGlyph] -> Image PixelRGBA8
 generateCanvas w h glyphs = runST $ do
   -- Initialize a transparent canvas
-  canvas <- createMutableImage w h (PixelRGBA8 0 0 0 0)
+  canvas <- newMutableImage w h
 
   forM_ glyphs $ \glyph -> do
     let glyphImg = glyph.rgImage
