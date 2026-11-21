@@ -94,7 +94,7 @@ executable saybar
   import: common-options
   ghc-options:
     -rtsopts
-    -with-rtsopts=-N
+    -with-rtsopts=-A256k
 
   hs-source-dirs: app
   pkgconfig-depends: fcft
