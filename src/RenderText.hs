@@ -76,16 +76,13 @@ renderGlyphs font textRunForeign fgColour penX penY = do
 
     blitPixel glyphImage row col alpha = case alpha of
       0 -> pure ()
-      255 -> writePixel glyphImage col row fgColour
-      a -> do
-        pixel <- readPixel glyphImage col row
-        writePixel glyphImage col row $ blendPixel a fgColour pixel
+      a -> writePixel glyphImage col row $ withAlpha a fgColour
 
-    blendPixel alpha (PixelRGBA8 fgR fgG fgB _) (PixelRGBA8 bgR bgG bgB _) =
-      let alphaN = fromIntegral alpha :: Word32
-          alphaI = 255 - alphaN
-          mix fg bg = fromIntegral $ (fromIntegral fg * alphaN + fromIntegral bg * alphaI) `div` 255
-       in PixelRGBA8 (mix fgR bgR) (mix fgG bgG) (mix fgB bgB) 255
+    withAlpha alpha (PixelRGBA8 fgR fgG fgB fgA) =
+      PixelRGBA8 fgR fgG fgB $ fromIntegral (alphaI * fgAI `div` 255 :: Word16)
+      where
+        alphaI = fromIntegral alpha
+        fgAI = fromIntegral fgA
 
 -- | Move a glyph by an offset.
 translateGlyph :: Float -> Float -> RenderedGlyph -> RenderedGlyph
