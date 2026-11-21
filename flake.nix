@@ -34,17 +34,13 @@
     self,
     ...
   }: let
-    pkgsFor = nixpkgs.lib.genAttrs (import systems) (system:
-      import nixpkgs {
-        inherit system;
-        overlays = [hs-bindgen.overlays.default];
-      });
+    pkgsFor = nixpkgs.lib.genAttrs (import systems) (system: import nixpkgs {inherit system;});
     eachSystem = f: nixpkgs.lib.genAttrs (import systems) (system: f system pkgsFor.${system});
   in {
     packages = eachSystem (system: pkgs: let
       saybar = pkgs.callPackage ./package.nix {
         niceHaskell = niceHaskell.outputs.niceHaskell.${system};
-        inherit saylandSrc;
+        inherit saylandSrc hs-bindgen;
       };
     in {
       inherit saybar;
@@ -54,6 +50,8 @@
     formatter = eachSystem (_system: pkgs: (treefmt-nix.lib.evalModule pkgs ./treefmt.nix).config.build.wrapper);
 
     devShells = eachSystem (system: pkgs: let
+      inherit (hs-bindgen.packages.${system}) hs-bindgen-cli hsBindgenHook;
+
       generate-cabal2nix = pkgs.writeShellApplication {
         name = "generate-cabal2nix";
         runtimeInputs = [pkgs.cabal2nix];
@@ -62,7 +60,7 @@
 
       generate-bindings = pkgs.writeShellApplication {
         name = "generate-bindings";
-        runtimeInputs = [pkgs.pkg-config pkgs.hs-bindgen-cli];
+        runtimeInputs = [pkgs.pkg-config hs-bindgen-cli];
         runtimeEnv.LANG = "C.UTF-8";
         excludeShellChecks = ["SC2207"];
         text = builtins.readFile ./generate-bindings.bash;
@@ -92,7 +90,7 @@
       bindings = pkgs.mkShell {
         inputsFrom = [self.packages.${system}.saybar.env];
         packages = [
-          pkgs.hsBindgenHook
+          hsBindgenHook
           generate-bindings
         ];
         shellHook = ''

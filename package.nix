@@ -1,29 +1,19 @@
 {
   niceHaskell,
-  haskell,
-  haskellPackages,
-  lib,
   saylandSrc,
-}: let
-  hlib = haskell.lib.compose;
-in
-  niceHaskell.mkPackageNoIFD {
-    src = ./.;
-    cabal2nix = ./cabal.nix;
-    inherit haskellPackages;
-    developPackageArgs.overrides = hself: hsuper: {
-      sayland = lib.pipe (hself.callPackage "${saylandSrc}/cabal.nix" {}) [
-        (hlib.overrideCabal {
-          src = saylandSrc;
-          buildTarget = "lib:sayland lib:sayland-wire";
-        })
-        hlib.dontCheck
-        hlib.disableLibraryProfiling
-      ];
-      hs-bindgen-runtime = lib.pipe hsuper.hs-bindgen-runtime [
-        hlib.dontCheck
-        hlib.dontHaddock
-        hlib.disableLibraryProfiling
-      ];
+  hs-bindgen,
+}:
+niceHaskell.mkPackageNoIFD {
+  src = ./.;
+  cabal2nix = ./cabal.nix;
+  developPackageArgs.overrides = _: _: {
+    sayland = niceHaskell.mkPackageNoIFD {
+      src = saylandSrc;
+      cabal2nix = "${saylandSrc}/cabal.nix";
     };
-  }
+    hs-bindgen-runtime = niceHaskell.mkPackageNoIFD {
+      src = "${hs-bindgen}/hs-bindgen-runtime";
+      cabal2nix = "${hs-bindgen}/nix/generated/hs-bindgen-runtime.nix";
+    };
+  };
+}
