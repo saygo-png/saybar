@@ -53,7 +53,6 @@ library fcft-bindings
   default-language: GHC2021
   build-depends:
     base >=4.7 && <5,
-    c-expr-runtime,
     hs-bindgen-runtime,
 
   -- cabal-gild: discover bindings --exclude=bindings/Generated/Fcft/Unsafe.hs

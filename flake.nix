@@ -14,22 +14,26 @@
       url = "github:saygo-png/sayland";
       flake = false;
     };
+    hs-bindgen = {
+      url = "github:well-typed/hs-bindgen";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     systems = {
       url = "path:./systems.nix";
       flake = false;
     };
-    hs-bindgen.url = "github:well-typed/hs-bindgen";
   };
 
   outputs = {
     nixpkgs,
     systems,
+    niceHaskell,
     saylandSrc,
     hs-bindgen,
     treefmt-nix,
     self,
     ...
-  } @ inputs: let
+  }: let
     pkgsFor = nixpkgs.lib.genAttrs (import systems) (system:
       import nixpkgs {
         inherit system;
@@ -38,78 +42,48 @@
     eachSystem = f: nixpkgs.lib.genAttrs (import systems) (system: f system pkgsFor.${system});
   in {
     packages = eachSystem (system: pkgs: let
-      niceHaskell = inputs.niceHaskell.outputs.niceHaskell.${system};
-    in rec {
-      sayland = niceHaskell.mkPackage {
-        packageRoot = saylandSrc;
-        cabalName = "sayland";
-        flags = niceHaskell.mkFlags {
-          doCheck = false;
-          doHaddock = false;
-        };
-      };
-
       saybar = pkgs.callPackage ./package.nix {
-        # Provide dependencies for nix based builds
-        inherit (pkgs.haskellPackages) c-expr-runtime hs-bindgen-runtime;
-        inherit sayland;
-        inherit niceHaskell;
+        niceHaskell = niceHaskell.outputs.niceHaskell.${system};
+        inherit saylandSrc;
       };
-
+    in {
+      inherit saybar;
       default = saybar;
     });
 
     formatter = eachSystem (_system: pkgs: (treefmt-nix.lib.evalModule pkgs ./treefmt.nix).config.build.wrapper);
 
-    devShells = eachSystem (
-      system: pkgs: let
-        niceHaskell = inputs.niceHaskell.outputs.niceHaskell.${system};
-        haskellShell =
-          (pkgs.callPackage ./package.nix {
-            inherit niceHaskell;
-            inherit (pkgs.haskellPackages) c-expr-runtime hs-bindgen-runtime;
-            inherit (self.packages.${system}) sayland;
-            shell = true;
-          }).overrideAttrs (old: {
-            nativeBuildInputs =
-              old.nativeBuildInputs
-              ++ [
-                self.formatter.${system}
-                pkgs.haskellPackages.cabal-install
-                pkgs.haskellPackages.haskell-language-server
-                # hs-bindgen cli
-                pkgs.hs-bindgen-cli
-                # Connect hs-bindgen to the Clang toolchain and `libpcap`
-                pkgs.hsBindgenHook
-              ];
-            buildInputs =
-              old.buildInputs
-              ++ [
-                pkgs.zlib
+    devShells = eachSystem (system: pkgs: let
+      generate-cabal2nix = pkgs.writeShellApplication {
+        name = "generate-cabal2nix";
+        runtimeInputs = [pkgs.cabal2nix];
+        text = "cabal2nix . > cabal.nix";
+      };
 
-                # fcft deps
-                pkgs.pkg-config
-                pkgs.freetype
-                pkgs.fontconfig
-                pkgs.nanosvg
-                pkgs.pixman
-                pkgs.tllist
-                pkgs.expat
-                pkgs.harfbuzz
-                pkgs.glib
-                pkgs.libsysprof-capture
-                pkgs.pcre2
-                pkgs.libutf8proc
-                pkgs.fcft
-              ];
-            shellHook = ''
-              export LD_LIBRARY_PATH="$PWD/fcft/lib:$LD_LIBRARY_PATH"
-            '';
-          });
-      in {
-        inherit haskellShell;
-        default = haskellShell;
-      }
-    );
+      generate-bindings = pkgs.writeShellApplication {
+        name = "generate-bindings";
+        runtimeInputs = [pkgs.pkg-config pkgs.hs-bindgen-cli];
+        runtimeEnv.LANG = "C.UTF-8";
+        excludeShellChecks = ["SC2207"];
+        text = builtins.readFile ./generate-bindings.bash;
+      };
+    in {
+      default = pkgs.mkShell {
+        inputsFrom = [self.packages.${system}.saybar.env];
+        packages = [
+          self.formatter.${system}
+          pkgs.cabal-install
+          pkgs.haskell-language-server
+          pkgs.hs-bindgen-cli
+          pkgs.hsBindgenHook
+          generate-cabal2nix
+          generate-bindings
+        ];
+        shellHook = ''
+          echo "generate-cabal2nix regenerate cabal.nix after changing saybar.cabal"
+          echo "generate-bindings regenerate bindings/ after updating nixpkgs or hs-bindgen"
+        '';
+      };
+    });
   };
 }

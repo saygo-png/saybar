@@ -40,4 +40,4 @@ hs-bindgen-cli preprocess \
   "${module_flags[@]}" \
   "${select_flags[@]}" \
   "${debug_flags[@]}" \
-  $(pkg-config --variable=includedir fcft)/fcft/fcft.h # Word splitting here is intentional
+  fcft/fcft.h
