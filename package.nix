@@ -11,10 +11,19 @@ in
     src = ./.;
     cabal2nix = ./cabal.nix;
     inherit haskellPackages;
-    developPackageArgs.overrides = hself: _: {
+    developPackageArgs.overrides = hself: hsuper: {
       sayland = lib.pipe (hself.callPackage "${saylandSrc}/cabal.nix" {}) [
-        (hlib.overrideCabal {src = saylandSrc;})
+        (hlib.overrideCabal {
+          src = saylandSrc;
+          buildTarget = "lib:sayland lib:sayland-wire";
+        })
         hlib.dontCheck
+        hlib.disableLibraryProfiling
+      ];
+      hs-bindgen-runtime = lib.pipe hsuper.hs-bindgen-runtime [
+        hlib.dontCheck
+        hlib.dontHaddock
+        hlib.disableLibraryProfiling
       ];
     };
   }

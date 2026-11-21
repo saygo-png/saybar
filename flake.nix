@@ -74,14 +74,33 @@
           self.formatter.${system}
           pkgs.cabal-install
           pkgs.haskell-language-server
-          pkgs.hs-bindgen-cli
-          pkgs.hsBindgenHook
           generate-cabal2nix
+        ];
+        shellHook = ''
+          echo ""
+          echo "-------------"
+          echo "\"generate-cabal2nix\""
+          echo "regenerate cabal.nix after changing saybar.cabal"
+          echo ""
+          echo "\"nix develop .#bindings -c generate-bindings\""
+          echo "regenerate bindings, after updating nixpkgs or hs-bindgen"
+          echo "-------------"
+          echo ""
+        '';
+      };
+
+      bindings = pkgs.mkShell {
+        inputsFrom = [self.packages.${system}.saybar.env];
+        packages = [
+          pkgs.hsBindgenHook
           generate-bindings
         ];
         shellHook = ''
-          echo "generate-cabal2nix regenerate cabal.nix after changing saybar.cabal"
-          echo "generate-bindings regenerate bindings/ after updating nixpkgs or hs-bindgen"
+          echo ""
+          echo "-------------"
+          echo "generate-bindings regenerate bindings/ for the locked nixpkgs and hs-bindgen"
+          echo "-------------"
+          echo ""
         '';
       };
     });
